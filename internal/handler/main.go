@@ -1,49 +1,58 @@
 package handler
 
 import(
+	"internal/logger"
 	"net/http"
-	"strconv"
+	"strings"
 )
-
-type MemStorage struct {
-	gauges map[string]float64
-	counters map[string]int64
+type Setter interface { Set(name string, value string) error }
+type Getter interface { Get(name string) (any, bool) }
+type Remover interface { Remove(name string) }
+type Repository interface {
+	Setter
+	Getter
+	Remover
 }
 
-var storage MemStorage = MemStorage{gauges: make(map[string]float64), counters: make(map[string]int64)}
+type controller struct {
+	l logger.Logger
+	repositories map[string]Repository
+}
 
-func update(w http.ResponseWriter, r *http.Request) {
-	metric_type := r.PathValue("type")
-	metric_name := r.PathValue("varName")
-	metric_value := r.PathValue("varValue")
+func (c *controller) ApplyTo(mux *http.ServeMux) {
+	mux.Handle("/update/{type}/{varName}/{varValue}", http.HandlerFunc(c.Update))
+}
 
+func NewController(l logger.Logger, repositories map[string]Repository) controller {
+	return controller{l: l, repositories: repositories}
+}
+
+func (c *controller) Update(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	switch metric_type {
-	case "gauge":
-		metric_value, err := strconv.ParseFloat(metric_value, 64)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-		} else {
-			storage.gauges[metric_name] = metric_value
-		}
-	case "counter":
-		metric_value, err := strconv.ParseInt(metric_value, 10, 64)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-		} else {
-			storage.counters[metric_name] += metric_value
-		}
-	default:
-			w.WriteHeader(http.StatusBadRequest)
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "text/plain") {
+		http.Error(w, "", http.StatusUnsupportedMediaType)
+		return
 	}
-}
 
-func UpdateHandler() *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/update/{type}/{varName}/{varValue}", update)
-	return mux
+	metric_type := r.PathValue("type")
+	metric_name := r.PathValue("varName")
+	metric_value := r.PathValue("varValue")
+
+	c.l.Log(r.URL)
+	c.l.Log(metric_type)
+	c.l.Log(metric_name)
+	c.l.Log(metric_value)
+
+	if repo, ok := c.repositories[metric_type]; ok {
+		 err := repo.Set(metric_name, metric_value)
+		 if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+		 }
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+	}
 }

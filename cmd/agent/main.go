@@ -4,11 +4,7 @@ import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/agent"
 	"time"
 	"context"
-)
-
-const(
-	pollInterval = 2 * time.Second
-	reportInterval = 5 * time.Second
+	"time"
 )
 
 func main() {
@@ -18,10 +14,12 @@ func main() {
 }
 
 func run() error {
+	parseFlags()
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
-	go agent.UpdateWorker.Run(ctx, pollInterval)
-	go agent.ReportWorker.Run(ctx, reportInterval)
+	agent.ReportURL.Host = flagReportAddr
+	go agent.UpdateWorker.Run(ctx, time.Duration(flagPollInterval) * time.Second)
+	go agent.ReportWorker.Run(ctx, time.Duration(flagReportInterval) * time.Second)
 	<-ctx.Done()
 	return ctx.Err()
 }

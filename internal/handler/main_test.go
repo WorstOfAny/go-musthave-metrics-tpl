@@ -78,6 +78,15 @@ func TestUpdate(t *testing.T) {
 			responseContentType: "text/plain; charset=utf-8",
 		},
 		{
+			name: "Get Request all metrics",
+			path: "/",
+			method: http.MethodGet,
+			expectedCode: http.StatusOK,
+			response: "<html><body><p>gauge some: 1</p></body></html>",
+			contentType: "text/plain; charset=utf-8",
+			responseContentType: "text/html;",
+		},
+		{
 			name: "POST Request Update gauge with invalid varName parameter",
 			path: "/update/gauge/1",
 			method: http.MethodPost,
@@ -121,15 +130,6 @@ func TestUpdate(t *testing.T) {
 			response: "",
 			contentType: "text/plain; charset=utf-8",
 			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "Get Request all metrics",
-			path: "/",
-			method: http.MethodGet,
-			expectedCode: http.StatusOK,
-			response: "<html><body><p>gauge some: 1</p><p>counter some: 1</p></body></html>",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/html;",
 		},
 		{
 			name: "Get gauge metric that exist",

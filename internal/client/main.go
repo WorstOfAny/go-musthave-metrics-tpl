@@ -1,28 +1,28 @@
 package client
 
 import(
+	"net/http"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/logger"
 	"time"
+	"strings"
 	"io"
-	"github.com/go-resty/resty/v2"
 )
 
 type Client struct {
-	client *resty.Client
+	l logger.Logger
+	client *http.Client
 }
 
-func NewClient() *Client {
-	restyC := resty.New()
-	restyC.SetTimeout(time.Second * 10)
-	//restyC.SetDebug(true)
-	return &Client{ client: restyC}
+func NewClient(l logger.Logger) *Client {
+	return &Client{
+		l: l,
+		client: &http.Client{ Timeout: time.Second * 1 },
+	}
 }
 
 func (c *Client) Post(u string) {
-	resp, err := c.client.R().
-		SetDoNotParseResponse(true).
-		SetHeader("Content-Type", "text/plain").
-		Post(u)
+	resp, err := c.client.Post(u, "text/plain", strings.NewReader(""))
 	if err != nil { return }
-	defer resp.RawBody().Close()
-	io.ReadAll(resp.RawBody())
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body)
 }

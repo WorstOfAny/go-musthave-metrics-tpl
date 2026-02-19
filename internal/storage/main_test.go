@@ -108,19 +108,3 @@ func TestRemove(t *testing.T) {
 	}
 }
 
-func TestAll(t *testing.T) {
-	st := NewStorage[int64](nil)
-
-	st.Set("1", 1)
-	st.Set("2", 2)
-
-	t.Run("Should iterate through inner map values", func(t *testing.T) {
-		for v:= range st.All() {
-			assert.IsType(t, int64(1), v)
-		}
-		for v := range st.All() {
-			assert.NotNil(t, v)
-			break
-		}
-	})
-}

@@ -3,8 +3,6 @@ package models
 import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/storage"
 	"strconv"
-	"iter"
-	"fmt"
 )
 
 const (
@@ -46,14 +44,6 @@ func (m *Metrics) Save() {
 	metricsStorage.Set(m.MType + m.ID, m)
 }
 
-func AllMetrics() iter.Seq[*Metrics] {
-	return func(yield func(*Metrics) bool) {
-		for v := range metricsStorage.All() {
-			if !yield(v) { return }
-		}
-	}
-}
-
 func (m *Metrics) Update(value string) (success bool) {
 	switch m.MType {
 		case Gauge:
@@ -92,8 +82,4 @@ func (m *Metrics) StringValue() string {
 	}
 
 	return result
-}
-
-func (m *Metrics) String() string {
-	return fmt.Sprintf("%s %s: %s", m.MType, m.ID, m.StringValue())
 }

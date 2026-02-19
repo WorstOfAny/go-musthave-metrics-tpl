@@ -3,8 +3,8 @@ package client
 import(
 	"net/http"
 	"time"
-	"strings"
 	"io"
+	"github.com/go-resty/resty/v2"
 )
 
 type Client struct {
@@ -18,8 +18,11 @@ func NewClient() *Client {
 }
 
 func (c *Client) Post(u string) {
-	resp, err := c.client.Post(u, "text/plain", strings.NewReader(""))
+	resp, err := c.client.R().
+		SetDoNotParseResponse(true).
+		SetHeader("Content-Type", "text/plain").
+		Post(u)
 	if err != nil { return }
-	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	defer resp.RawBody().Close()
+	io.ReadAll(resp.RawBody())
 }

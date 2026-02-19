@@ -8,11 +8,11 @@ import(
 )
 
 func TestNewClient(t *testing.T) {
-	NewClient(nil)
+	NewClient()
 }
 
 func TestPost(t *testing.T) {
-	c := NewClient(nil)
+	c := NewClient()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))

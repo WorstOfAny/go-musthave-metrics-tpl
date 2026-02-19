@@ -8,7 +8,7 @@ import(
 
 const(
 	pollInterval = 2 * time.Second
-	reportInterval = 10 * time.Second
+	reportInterval = 5 * time.Second
 )
 
 func main() {

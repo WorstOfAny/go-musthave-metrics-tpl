@@ -2,9 +2,14 @@ package main
 
 import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler"
-	"github.com/go-chi/chi/v5"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/logger"
 	"net/http"
+	"fmt"
 )
+
+func LogOutput(message ...any) {
+	fmt.Println(message...)
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -13,11 +18,9 @@ func main() {
 }
 
 func run() error {
-	c := handler.NewMetricsController()
-	r := chi.NewRouter()
-	c.ApplyTo(r)
-
-	srv := &http.Server{Addr: ":8080", Handler: r}
-	defer srv.Close()
-	return srv.ListenAndServe()
+	l := logger.LoggerAdapter(LogOutput)
+	c := handler.NewController(l)
+	mux := http.NewServeMux()
+	c.ApplyTo(mux)
+	return http.ListenAndServe(`:8080`, mux)
 }

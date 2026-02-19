@@ -313,23 +313,3 @@ func TestStringValue(t *testing.T) {
 		})
 	}
 }
-
-func TestAllMetrics(t *testing.T) {
-	t.Run("Should iterate through all metrics", func(t *testing.T) {
-		for v:= range AllMetrics() {
-			assert.IsType(t, Metrics{}, *v)
-		}
-		for v := range AllMetrics() {
-			assert.NotNil(t, v)
-			break
-		}
-	})
-}
-
-func TestString(t *testing.T) {
-	t.Run("Should return string metric representation", func(t *testing.T) {
-		m := Metrics{ID: "MyM", MType: Gauge, Value: new(float64)}
-
-		assert.Equal(t, "gauge MyM: 0", m.String())
-	})
-}

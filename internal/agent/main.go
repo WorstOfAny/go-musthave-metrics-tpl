@@ -6,13 +6,12 @@ import(
 	"time"
 	"path"
 	"context"
-	"net/url"
 )
 
 var statsObject = stats.NewStats()
-var clientObject = client.NewClient()
+var clientObject = client.NewClient(nil)
 
-var ReportURL = &url.URL{ Scheme: "http", Host: "localhost:8080" }
+var reportURL = "http://localhost:8080"
 
 type Worker struct {
 	action func()
@@ -33,7 +32,7 @@ func (w *Worker) Run(ctx context.Context, delay time.Duration) {
 
 func reportMetrics() {
 	for metric := range statsObject.AllMetrics() {
-		clientObject.Post(ReportURL.String() + "/" + path.Join("update", metric.MType, metric.ID, metric.StringValue()))
+		clientObject.Post(reportURL + "/" + path.Join("update", metric.MType, metric.ID, metric.StringValue()))
 	}
 	*statsObject.PollCount = 0
 }

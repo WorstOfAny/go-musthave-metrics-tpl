@@ -1,9 +1,8 @@
 package main
 
 import(
-	"internal/handler"
-	"internal/storage"
-	"internal/logger"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/logger"
 	"net/http"
 	"fmt"
 )
@@ -20,11 +19,7 @@ func main() {
 
 func run() error {
 	l := logger.LoggerAdapter(LogOutput)
-	repos := map[string]handler.Repository{
-		"gauge": storage.NewStorage[storage.Gauge](l),
-		"counter": storage.NewStorage[*storage.Count](l),
-	}
-	c := handler.NewController(l, repos)
+	c := handler.NewController(l)
 	mux := http.NewServeMux()
 	c.ApplyTo(mux)
 	return http.ListenAndServe(`:8080`, mux)

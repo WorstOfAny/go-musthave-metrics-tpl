@@ -1,5 +1,7 @@
 package storage
 
+import "iter"
+
 type memStorage[T any] struct {
 	l interface { Log(message ...any) }
 	ds map[string]T
@@ -20,4 +22,12 @@ func (s *memStorage[T]) Remove(k string) {
 
 func NewStorage[T any](l interface { Log(message ...any) }) (*memStorage[T]) {
 	return &memStorage[T]{l: l, ds: map[string]T{}}
+}
+
+func (s *memStorage[T]) All() iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for _, v := range s.ds {
+			if !yield(v) { return }
+		}
+	}
 }

@@ -3,6 +3,7 @@ package agent
 import(
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"github.com/stretchr/testify/assert"
 	"time"
@@ -15,7 +16,6 @@ func TestRun(t *testing.T) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	worker := Worker{action: func() { callTimes++ }}
-
 	go worker.Run(ctx, 1 * time.Second)
 	time.Sleep(4 * time.Second + 5 * time.Millisecond)
 	cancelFunc()
@@ -32,6 +32,6 @@ func TestReportMetrics(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	reportURL = ts.URL
+	ReportURL, _ = url.Parse(ts.URL)
 	reportMetrics()
 }

@@ -3,6 +3,7 @@ package agent
 import(
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"github.com/stretchr/testify/assert"
 	"time"
@@ -32,6 +33,6 @@ func TestReportMetrics(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	reportURL = ts.URL
+	ReportURL, _ = url.Parse(ts.URL)
 	reportMetrics()
 }

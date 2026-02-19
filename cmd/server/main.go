@@ -13,12 +13,11 @@ func main() {
 }
 
 func run() error {
-	parseFlags()
 	c := handler.NewMetricsController()
 	r := chi.NewRouter()
 	c.ApplyTo(r)
 
-	srv := &http.Server{Addr: flagRunAddr, Handler: r}
+	srv := &http.Server{Addr: ":8080", Handler: r}
 	defer srv.Close()
 	return srv.ListenAndServe()
 }

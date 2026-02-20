@@ -3,8 +3,6 @@ package handler
 import(
 	"net/http"
 	"net/http/httptest"
-	"internal/storage"
-	"internal/logger"
 	"testing"
 	"io"
 	"github.com/stretchr/testify/assert"
@@ -12,13 +10,7 @@ import(
 
 
 func TestUpdate(t *testing.T) {
-	l := logger.LoggerAdapter(t.Log)
-	repositories := map[string]Repository{
-		"gauge": storage.NewStorage[storage.Gauge](l),
-		"counter": storage.NewStorage[*storage.Count](l),
-	}
-
-	c := NewController(logger.LoggerAdapter(t.Log), repositories)
+	c := NewController()
 	testCases := []struct {
 		name string
 		method string

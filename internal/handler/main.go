@@ -10,38 +10,48 @@ import(
 	"fmt"
 )
 
-type metricsController struct {
-}
+type metricsController struct {}
 
-func (c *metricsController) ApplyTo(mux *http.ServeMux) {
-	mux.Handle("/update/{type}/{varName}/{varValue}", http.HandlerFunc(c.Update))
-}
+type ctxKey string
+const(
+	metricKey ctxKey = "metric"
+	metricTypeKey ctxKey = "metricType"
+	metricNameKey ctxKey = "metricName"
+	metricValueKey ctxKey = "metricValue"
+)
+
+func (c *metricsController) ApplyTo(mux chi.Router) {
+	mux.Use(middleware.Logger)
+	mux.Use(textPlainTypeSet)
+	mux.Get("/", c.listAll)
+	mux.Route("/value/{metricType}/{metricName}", func(r chi.Router) {
+		r.Use(metricTypeCtx)
+		r.Use(metricNameCtx)
+		r.Get("/", c.get)
+	})
+	mux.Route("/update/{metricType}/{metricName}/{metricValue}", func(r chi.Router) {
+		r.Use(textPlainTypeCheck)
+		r.Use(metricTypeCtx)
+		r.Use(metricNameCtx)
+		r.Use(metricValueCtx)
+		r.Post("/", c.update)
+	})}
 
 func NewController() *metricsController {
 	return &metricsController{}
 }
 
-func (c *metricsController) Update(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+func metricTypeCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		metricType := chi.URLParam(r, string(metricTypeKey))
 
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "text/plain") {
-		w.WriteHeader(http.StatusUnsupportedMediaType)
-		return
-	}
-
-	metric, ok := models.FindMetric(r.PathValue("type"), r.PathValue("varName"))
-	newMetric := !ok
-
-	if !ok {
-		metric, ok = models.NewMetric(r.PathValue("type"), r.PathValue("varName"))
-	}
-
-	if ok && metric.Update(r.PathValue("varValue")) {
-		if newMetric {
-			metric.Save()
+		switch metricType {
+		case models.Gauge, models.Counter:
+			ctx := context.WithValue(r.Context(), metricTypeKey, metricType)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
 	})
 }

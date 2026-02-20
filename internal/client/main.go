@@ -1,20 +1,20 @@
 package client
 
 import(
-	"net/http"
 	"time"
 	"io"
 	"github.com/go-resty/resty/v2"
 )
 
 type Client struct {
-	client *http.Client
+	client *resty.Client
 }
 
 func NewClient() *Client {
-	return &Client{
-		client: &http.Client{ Timeout: time.Second * 1 },
-	}
+	restyC := resty.New()
+	restyC.SetTimeout(time.Second * 10)
+
+	return &Client{ client: restyC }
 }
 
 func (c *Client) Post(u string) {

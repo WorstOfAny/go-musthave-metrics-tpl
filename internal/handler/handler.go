@@ -50,6 +50,26 @@ func (wr *responseWriter) WriteHeader(statusCode int) {
 }
 
 type ctxKey string
+type responseData struct {
+	status int
+	size int
+}
+type responseWriter struct {
+	http.ResponseWriter
+	responseData *responseData
+}
+
+func (wr *responseWriter) Write(b []byte) (int, error) {
+	size, err := wr.ResponseWriter.Write(b)
+	wr.responseData.size += size
+	return size, err
+}
+
+func (wr *responseWriter) WriteHeader(statusCode int) {
+	wr.ResponseWriter.WriteHeader(statusCode)
+	wr.responseData.status = statusCode
+}
+
 const(
 	metricKey ctxKey = "metric"
 	metricTypeKey ctxKey = "metricType"
@@ -72,6 +92,26 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 		r.Use(c.metricNameCtx)
 		r.Use(metricValueCtx)
 		r.Post("/", c.update)
+	})
+}
+
+func logRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		responseD := &responseData{status: http.StatusOK}
+		lw := responseWriter{ResponseWriter: w, responseData: responseD}
+
+		next.ServeHTTP(&lw, r)
+
+		log.Info().
+			Str("request_method", r.Method).
+			Str("request_uri", r.RequestURI).
+			Dur("duration", time.Since(start)).
+			Msg("")
+		log.Info().
+			Int("response_status", responseD.status).
+			Int("response_size", responseD.size).
+			Msg("")
 	})
 }
 

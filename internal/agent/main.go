@@ -9,7 +9,7 @@ import(
 )
 
 var statsObject = stats.NewStats()
-var clientObject = client.NewClient(nil)
+var clientObject = client.NewClient()
 
 var reportURL = "http://localhost:8080"
 

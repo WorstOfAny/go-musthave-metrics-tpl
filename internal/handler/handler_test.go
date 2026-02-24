@@ -4,204 +4,389 @@ import(
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"strings"
 	"io"
 	"github.com/stretchr/testify/assert"
 	"github.com/go-chi/chi/v5"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/storage"
+	"math"
 )
 
+type want struct {
+	code int
+	contentType string
+	body string
+}
 
-func TestUpdate(t *testing.T) {
-	c := NewMetricsController(storage.NewStorage[*models.Metrics]())
-	testCases := []struct {
-		name string
-		method string
-		expectedCode int
-		response string
-		metrics []models.Metrics
-		path string
-		contentType string
-		responseContentType string
-	}{
-		{
-			name: "GET Request",
-			path: "/update/gauge/some/1",
-			method: http.MethodGet,
-			expectedCode: http.StatusMethodNotAllowed,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
+type bodyCase struct {
+	name string
+	body string
+	want want
+}
+
+type pathCase struct {
+	name string
+	path string
+	bodyCases []bodyCase
+}
+
+type methodCase struct {
+	name string
+	method string
+	pathCases []pathCase
+}
+
+type requestCase struct {
+	name string
+	contentType string
+	body string
+	methodCases []methodCase
+}
+
+func TestListAll(t *testing.T) {
+	testCases := []requestCase {
+		requestCase{
+			name: "Content-Type: text_plain",
+			contentType: "text/plain",
+			methodCases: []methodCase{
+				methodCase{
+					name: "Method: GET",
+					method: http.MethodGet,
+					pathCases: []pathCase{
+						pathCase{
+							name: "Index path",
+							path: "/",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusOK, contentType: "text/html", body: "<html><body><p>gauge MyGauge: 1.1</p></body></html>" },
+								},
+							},
+						},
+					},
+				},
+			},
 		},
-		{
-			name: "PUT Request",
-			path: "/update/gauge/some/1",
-			method: http.MethodPut,
-			expectedCode: http.StatusMethodNotAllowed,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "DELETE Request",
-			path: "/update/gauge/some/1",
-			method: http.MethodDelete,
-			expectedCode: http.StatusMethodNotAllowed,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "POST Request Update with invalid content type",
-			path: "/update/garbge/some/1",
-			method: http.MethodPost,
-			expectedCode: http.StatusUnsupportedMediaType,
-			response: "",
-			contentType: "application/json",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "POST Request Update with invalid type parameter",
-			path: "/update/garbge/some/1",
-			method: http.MethodPost,
-			expectedCode: http.StatusBadRequest,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "POST Request Update gauge with valid parameters",
-			path: "/update/gauge/some/1",
-			method: http.MethodPost,
-			expectedCode: http.StatusOK,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "Get Request all metrics",
-			path: "/",
-			method: http.MethodGet,
-			expectedCode: http.StatusOK,
-			response: "<html><body><p>gauge some: 1</p></body></html>",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/html;",
-		},
-		{
-			name: "POST Request Update gauge with invalid varName parameter",
-			path: "/update/gauge/1",
-			method: http.MethodPost,
-			expectedCode: http.StatusNotFound,
-			response: "404 page not found\n",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "POST Request Update gauge with invalid varValue parameter",
-			path: "/update/gauge/some/_",
-			method: http.MethodPost,
-			expectedCode: http.StatusBadRequest,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "POST Request Update counter with valid parameters",
-			path: "/update/counter/some/1",
-			method: http.MethodPost,
-			expectedCode: http.StatusOK,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "POST Request Update counter with invalid varName parameter",
-			path: "/update/counter/1",
-			method: http.MethodPost,
-			expectedCode: http.StatusNotFound,
-			response: "404 page not found\n",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "POST Request Update counter with invalid varValue parameter",
-			path: "/update/counter/some/_",
-			method: http.MethodPost,
-			expectedCode: http.StatusBadRequest,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "Get gauge metric that exist",
-			path: "/value/gauge/someGauge",
-			method: http.MethodGet,
-			expectedCode: http.StatusOK,
-			metrics: []models.Metrics{models.Metrics{ID: "someGauge", MType: models.Gauge, Value: new(float64)}},
-			response: "0",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "Get gauge metric that not exist",
-			path: "/value/gauge/someGauge1",
-			method: http.MethodGet,
-			expectedCode: http.StatusNotFound,
-			metrics: []models.Metrics{},
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "Get myType metric",
-			path: "/value/MyGauge/someGauge1",
-			method: http.MethodGet,
-			expectedCode: http.StatusBadRequest,
-			metrics: []models.Metrics{},
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "Post with missed metric name",
-			path: "/update/gauge//1",
-			method: http.MethodPost,
-			expectedCode: http.StatusNotFound,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
-		},
-		{
-			name: "Post with missed metric value",
-			path: "/update/gauge/1//",
-			method: http.MethodPost,
-			expectedCode: http.StatusBadRequest,
-			response: "",
-			contentType: "text/plain; charset=utf-8",
-			responseContentType: "text/plain; charset=utf-8",
+		requestCase{
+			name: "Content-Type: my_content",
+			contentType: "my/content",
+			methodCases: []methodCase{
+				methodCase{
+					name: "Method: GET",
+					method: http.MethodGet,
+					pathCases: []pathCase{
+						pathCase{
+							name: "Index path",
+							path: "/",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "Any",
+									want: want{ code: http.StatusUnsupportedMediaType, contentType: "text/plain", body: "" },
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T){
-			mux := chi.NewRouter()
-			c.ApplyTo(mux)
-			r := httptest.NewRequest(tc.method, tc.path, nil)
-			r.Header.Set("Content-Type", tc.contentType)
-			w := httptest.NewRecorder()
-			for _, v := range tc.metrics {
+	val := 1.1
 
-				c.storage.Set(v.MType + v.ID, &v)
+	(&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val}).Save()
+
+	runCases(t, testCases)
+}
+
+func TestShowTextPlain(t *testing.T) {
+	testCases := []requestCase {
+		requestCase{
+			name: "Content-Type: text_plain",
+			contentType: "text/plain",
+			methodCases: []methodCase{
+				methodCase{
+					name: "Method: GET",
+					method: http.MethodGet,
+					pathCases: []pathCase{
+						pathCase{
+							name: "Show path with valid path parameters",
+							path: "/value/gauge/MyGauge",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusOK, contentType: "text/plain", body: "1.1" },
+								},
+							},
+						},
+						pathCase{
+							name: "Show path with path parameter metricName that doesn't exist",
+							path: "/value/gauge/UnknownGauge",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusNotFound, contentType: "text/plain", body: "" },
+								},
+							},
+						},
+						pathCase{
+							name: "Show path with path parameter metricType that doesn't exist",
+							path: "/value/MyType/Unknown",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusBadRequest, contentType: "text/plain", body: "" },
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	val := 1.1
+
+	(&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val}).Save()
+
+	runCases(t, testCases)
+}
+
+func TestShowJSON(t *testing.T) {
+	testCases := []requestCase {
+		requestCase{
+			name: "Content-Type: application_json",
+			contentType: "application/json",
+			methodCases: []methodCase{
+				methodCase{
+					name: "Method: POST",
+					method: http.MethodPost,
+					pathCases: []pathCase{
+						pathCase{
+							name: "Show path",
+							path: "/value",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with valid json body get Gauge",
+									body: "{\"id\": \"MyGauge\", \"type\": \"gauge\"}",
+									want: want{ code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.1}" },
+								},
+								bodyCase{
+									name: "with valid json body get Counter",
+									body: "{\"id\": \"MyCounter\", \"type\": \"counter\"}",
+									want: want{ code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyCounter\",\"type\":\"counter\",\"delta\":5}" },
+								},
+								bodyCase{
+									name: "with valid json body but not existing metric",
+									body: "{\"id\": \"SomeGauge\", \"type\": \"gauge\"}",
+									want: want{ code: http.StatusNotFound, contentType: "application/json", body: "" },
+								},
+								bodyCase{
+									name: "with valid json body and invalid type",
+									body: "{\"id\": \"MyGauge\", \"type\": \"MyType\"}",
+									want: want{ code: http.StatusBadRequest, contentType: "application/json", body: "" },
+								},
+								bodyCase{
+									name: "with invalid json body",
+									body: "{id: \"MyGauge\", type: \"gauge\"}",
+									want: want{ code: http.StatusInternalServerError, contentType: "application/json", body: "" },
+								},
+								bodyCase{
+									name: "with invalid json body",
+									body: "{id: \"MyGauge\", type: \"gauge\"",
+									want: want{ code: http.StatusInternalServerError, contentType: "application/json", body: "" },
+								},
+								bodyCase{
+									name: "with valid json body, but object can't be serialized",
+									body: "{\"id\": \"BrokenGauge\", \"type\": \"gauge\"}",
+									want: want{ code: http.StatusInternalServerError, contentType: "application/json", body: "" },
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	gaugeVal := 1.1
+	counterVal := int64(5)
+	brokenVal := math.NaN()
+
+	(&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &gaugeVal}).Save()
+	(&models.Metrics{ID:"BrokenGauge", MType: models.Gauge, Value: &brokenVal}).Save()
+	(&models.Metrics{ID:"MyCounter", MType: models.Counter, Delta: &counterVal}).Save()
+
+	runCases(t, testCases)
+}
+
+func TestUpdate(t *testing.T) {
+	testCases := []requestCase {
+		requestCase{
+			name: "Content-Type: text_plain",
+			contentType: "text/plain",
+			methodCases: []methodCase{
+				methodCase{
+					name: "Method: POST",
+					method: http.MethodPost,
+					pathCases: []pathCase{
+						pathCase{
+							name: "Update path with valid path parameters with old ID",
+							path: "/update/gauge/MyGauge/1.1",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusOK, contentType: "text/plain", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.1}"  },
+								},
+							},
+						},
+						pathCase{
+							name: "Update path with valid path parameters with new ID",
+							path: "/update/gauge/newGauge/1.1",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusOK, contentType: "text/plain", body: "{\"id\":\"newGauge\",\"type\":\"gauge\",\"value\":1.1}" },
+								},
+							},
+						},
+						pathCase{
+							name: "Update path with invalid path parameter metricValue",
+							path: "/update/gauge/newGauge/one+dot+one",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusBadRequest, contentType: "text/plain", body: "" },
+								},
+							},
+						},
+						pathCase{
+							name: "Update path with missed path parameter metricValue",
+							path: "/update/gauge/newGauge//",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusBadRequest, contentType: "text/plain", body: "" },
+								},
+							},
+						},
+						pathCase{
+							name: "Update path with invalid path parameter metricName",
+							path: "/update/gauge//one+dot+one/",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusNotFound, contentType: "text/plain", body: "" },
+								},
+							},
+						},
+						pathCase{
+							name: "Update path with invalid path parameter metricType",
+							path: "/update/MyType/myObject/one+dot+one/",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with empty body",
+									want: want{ code: http.StatusBadRequest, contentType: "text/plain", body: "" },
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		requestCase{
+			name: "Request application/json",
+			contentType: "application/json",
+			methodCases: []methodCase{
+				methodCase{
+					name: "method POST",
+					method: http.MethodPost,
+					pathCases: []pathCase{
+						pathCase{
+							name: "Update path",
+							path: "/update",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with valid json body update Gauge",
+									body: "{\"id\": \"MyGauge\", \"type\": \"gauge\", \"value\": 1.4}",
+									want: want{ code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.4}" },
+								},
+								bodyCase{
+									name: "with valid json body update Counter",
+									body: "{\"id\": \"MyCounter\", \"type\": \"counter\", \"delta\": 5}",
+									want: want{ code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyCounter\",\"type\":\"counter\",\"delta\":5}" },
+								},
+								bodyCase{
+									name: "with invalid json body",
+									body: "{id: \"MyGauge\", type: \"gauge\", \"value\": 1.4}",
+									want: want{ code: http.StatusInternalServerError, contentType: "application/json", body: "" },
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		requestCase{
+			name: "Content-Type: my_content",
+			contentType: "my/content",
+			methodCases: []methodCase{
+				methodCase{
+					name: "Method: POST",
+					method: http.MethodPost,
+					pathCases: []pathCase{
+						pathCase{
+							name: "Update path",
+							path: "/update",
+							bodyCases: []bodyCase{
+								bodyCase{
+									name: "with valid json body",
+									body: "{\"id\": \"MyGauge\", \"type\": \"gauge\", \"value\": 1.4}",
+									want: want{ code: http.StatusUnsupportedMediaType, contentType: "application/json", body: "" },
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+
+	(&models.Metrics{ID:"MyGauge", MType: models.Gauge}).Save()
+	(&models.Metrics{ID:"MyCounter", MType: models.Counter}).Save()
+
+	runCases(t, testCases)
+
+}
+
+func runCases(t *testing.T, cases []requestCase) {
+	for _, tc := range cases {
+		c := NewMetricsController(storage.NewStorage[*models.Metrics]())
+		mux := chi.NewRouter()
+		c.ApplyTo(mux)
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mtc := range tc.methodCases {
+				t.Run(mtc.name, func(t *testing.T){
+					for _, ptc := range mtc.pathCases {
+						t.Run(ptc.name, func(t *testing.T) {
+							for _, btc := range ptc.bodyCases {
+								t.Run(btc.name, func(t *testing.T) {
+									r := httptest.NewRequest(mtc.method, ptc.path, strings.NewReader(btc.body))
+									r.Header.Set("Content-Type", tc.contentType)
+									w := httptest.NewRecorder()
+									mux.ServeHTTP(w, r)
+									rBody, _ := io.ReadAll(w.Body)
+									rContentType := w.Header().Get("Content-Type")
+									assert.Equal(t, btc.want.code, w.Code, "Код ответа не совпадает с ожидаемым")
+									assert.Equal(t, btc.want.body, string(rBody), "Тело ответа не совпадает с ожидаемым")
+									assert.Equal(t, true, strings.HasPrefix(rContentType, btc.want.contentType), "Content-Type ответа не совпадает с ожидаемым")
+								})
+							}
+						})
+					}
+				})
 			}
-
-			mux.ServeHTTP(w, r)
-
-			rBody, _ := io.ReadAll(w.Body)
-			rContentType := w.Header().Get("Content-Type")
-
-			assert.Equal(t, tc.expectedCode, w.Code, "Код ответа не совпадает с ожидаемым")
-			assert.Equal(t, tc.response, string(rBody), "Тело ответа не совпадает с ожидаемым")
-			assert.Equal(t, tc.responseContentType, rContentType, "Content-Type ответа не совпадает с ожидаемым")
 		})
 	}
 }

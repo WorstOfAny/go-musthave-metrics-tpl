@@ -4,9 +4,9 @@ import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
 	"time"
-	"path"
 	"context"
 	"net/url"
+	"encoding/json"
 )
 
 type agent struct {
@@ -47,7 +47,8 @@ func (w *worker) Run(ctx context.Context, errCh chan error, delay time.Duration)
 
 func (a *agent) reportMetrics() (err error) {
 	for metric := range a.stats.AllMetrics() {
-		err = a.client.Post(a.reportURL.String() + "/" + path.Join("update", metric.MType, metric.ID, metric.StringValue()))
+		body, _ := json.Marshal(metric)
+		err = a.client.Post(a.reportURL.String() + "/update", body)
 	}
 	*a.stats.PollCount = 0
 	return err

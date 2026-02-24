@@ -17,10 +17,10 @@ func NewClient() *Client {
 	return &Client{ client: restyC }
 }
 
-func (c *Client) Post(u string) error {
+func (c *Client) Post(u string, body []byte) error {
 	resp, err := c.client.R().
-		SetDoNotParseResponse(true).
-		SetHeader("Content-Type", "text/plain").
+		SetHeader("Content-Type", "application/json").
+		SetBody(body).
 		Post(u)
 	if err != nil { return err }
 	defer resp.RawBody().Close()

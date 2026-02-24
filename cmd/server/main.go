@@ -14,7 +14,7 @@ func main() {
 
 func run() error {
 	parseFlags()
-	c := handler.NewController()
+	c := handler.NewMetricsController()
 	r := chi.NewRouter()
 	c.ApplyTo(r)
 	srv := &http.Server{Addr: flagRunAddr, Handler: r}

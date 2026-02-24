@@ -4,9 +4,9 @@ import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
 	"time"
-	"path"
 	"context"
 	"net/url"
+	"encoding/json"
 )
 
 var statsObject = stats.NewStats()
@@ -33,7 +33,8 @@ func (w *Worker) Run(ctx context.Context, delay time.Duration) {
 
 func reportMetrics() {
 	for metric := range statsObject.AllMetrics() {
-		clientObject.Post(ReportURL.String() + "/" + path.Join("update", metric.MType, metric.ID, metric.StringValue()))
+		body, _ := json.Marshal(metric)
+		clientObject.Post(ReportURL.String() + "/update", body)
 	}
 	*statsObject.PollCount = 0
 }

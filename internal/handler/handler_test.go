@@ -349,7 +349,7 @@ func TestUpdate(t *testing.T) {
 								bodyCase{
 									name: "with valid json body",
 									body: "{\"id\": \"MyGauge\", \"type\": \"gauge\", \"value\": 1.4}",
-									want: want{ code: http.StatusUnsupportedMediaType, contentType: "application/json", body: "" },
+									want: want{ code: http.StatusUnsupportedMediaType, contentType: "", body: "" },
 								},
 							},
 						},

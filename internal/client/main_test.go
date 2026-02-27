@@ -20,7 +20,7 @@ func TestPost(t *testing.T) {
 		w.Write([]byte(""))
 	}))
 	defer ts.Close()	
-	c.Post("http://localhost:0", []byte{})
+	c.Post("http://localhost:0", []byte(""))
 
-	c.Post(ts.URL, []byte{})
+	c.Post(ts.URL, []byte(""))
 }

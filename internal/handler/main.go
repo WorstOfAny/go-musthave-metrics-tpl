@@ -11,6 +11,8 @@ import(
 	"time"
 	"encoding/json"
 	"net/http/httputil"
+	"compress/gzip"
+	"io"
 )
 
 type metricsController struct {}
@@ -22,6 +24,15 @@ type responseData struct {
 type responseWriter struct {
 	http.ResponseWriter
 	responseData *responseData
+}
+
+type gzipWriter struct {
+	http.ResponseWriter
+	Writer io.Writer
+}
+
+func (w gzipWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
 }
 
 func (wr *responseWriter) Write(b []byte) (int, error) {
@@ -43,10 +54,11 @@ const(
 )
 
 func (c *metricsController) ApplyTo(mux chi.Router) {
+	mux.Use(decodeRequest)
 	mux.Use(logRequest)
-	mux.With(textPlainTypeCheck).Get("/", c.listAll)
+	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)
 	mux.Route("/value", func(r chi.Router) {
-		r.With(jsonTypeSet, jsonTypeCheck, jsonCtx).Post("/", c.showJSON)
+		r.With(jsonTypeCheck, jsonTypeSet, jsonCtx, encodeResponse).Post("/", c.showJSON)
 		r.Route("/{metricType}/{metricName}", func(r chi.Router){
 			r.Use(textPlainTypeSet, textPlainTypeCheck, metricTypeCtx, metricNameCtx)
 			r.Get("/", c.showTextPlain)
@@ -54,7 +66,7 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 	})
 
 	mux.Route("/update", func(r chi.Router) {
-		r.With(jsonTypeSet, jsonTypeCheck, jsonCtx).Post("/", c.update)
+		r.With(jsonTypeCheck, jsonTypeSet, jsonCtx, encodeResponse).Post("/", c.update)
 		r.Route("/{metricType}/{metricName}/{metricValue}", func(r chi.Router) {
 			r.Use(textPlainTypeSet, textPlainTypeCheck, metricTypeCtx, metricNameCtx, metricValueCtx)
 			r.Post("/", c.update)
@@ -82,6 +94,50 @@ func logRequest(next http.Handler) http.Handler {
 			Int("response_size", responseD.size).
 			Str("response_content_type", lw.Header().Get("Content-Type")).
 			Msg("")
+	})
+}
+
+func decodeRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		gz , err := gzip.NewReader(r.Body)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		defer gz.Close()
+
+		r.Body = gz
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func encodeResponse(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+
+		if err != nil {
+			io.WriteString(w, err.Error())
+			return
+		}
+
+		defer gz.Close()
+		
+		w.Header().Set("Content-Encoding", "gzip")
+
+		next.ServeHTTP(gzipWriter{ResponseWriter: w, Writer: gz}, r)
 	})
 }
 

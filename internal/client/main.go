@@ -25,7 +25,7 @@ func (c *Client) Post(u string, body []byte) {
 	gw, _ := gzip.NewWriterLevel(&cbody, gzip.BestCompression)
 	gw.Write(body)
 	gw.Close()
-	log.Info().Str("body", string(body)).Int("len", len(body)).Str("compressed_body", string(cbody.Bytes())).Int("comprassed_len", len(cbody.Bytes())).Msg("")
+	log.Info().Str("body", string(body)).Int("len", len(body)).Str("compressed_body", cbody.String()).Int("comprassed_len", len(cbody.Bytes())).Msg("")
 
 	resp, err := c.client.R().
 		SetDoNotParseResponse(true).

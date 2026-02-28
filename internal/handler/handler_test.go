@@ -44,6 +44,7 @@ type requestCase struct {
 	methodCases []methodCase
 }
 
+
 func TestListAll(t *testing.T) {
 	testCases := []requestCase {
 		requestCase{

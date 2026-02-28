@@ -40,6 +40,4 @@ func run() error {
 	srv := &http.Server{Addr: flagRunAddr, Handler: r}
 	defer srv.Close()
 	return srv.ListenAndServe()
-	<-ctx.Done()
-	return ctx.Err()
 }

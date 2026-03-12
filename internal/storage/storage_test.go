@@ -8,7 +8,7 @@ import(
 
 func TestNewStorage (t *testing.T) {
 	t.Run("Create int64 Storage", func(t *testing.T) {
-		s := NewStorage[*int64](nil)
+		s := NewStorage[*int64]()
 
 		if s.ds == nil {
 			t.Fatal("Map didn't initialized")
@@ -19,7 +19,7 @@ func TestNewStorage (t *testing.T) {
 }
 
 func TestSet(t *testing.T) {
-	storage := NewStorage[*int64](nil)
+	storage := NewStorage[*int64]()
 
 	type want struct {
 		storedValue int64
@@ -49,7 +49,7 @@ func TestSet(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	storage := NewStorage[*int64](nil)
+	storage := NewStorage[*int64]()
 	myInt := int64(1)
 	storage.Set("myInt", &myInt)
 
@@ -85,7 +85,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	storage := NewStorage[*int64](nil)
+	storage := NewStorage[*int64]()
 	testInt := int64(2)
 
 	storage.Set("testInt", &testInt)
@@ -109,7 +109,7 @@ func TestRemove(t *testing.T) {
 }
 
 func TestAll(t *testing.T) {
-	st := NewStorage[int64](nil)
+	st := NewStorage[int64]()
 
 	st.Set("1", 1)
 	st.Set("2", 2)

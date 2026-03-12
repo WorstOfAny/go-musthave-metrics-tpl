@@ -8,7 +8,6 @@ import(
 func TestNewMetric(t *testing.T) {
 	type want struct {
 		returnValue *Metrics
-		valueExist bool
 	}
 
 	testCases := []struct {
@@ -23,7 +22,6 @@ func TestNewMetric(t *testing.T) {
 			metricType: Gauge,
 			want: want {
 				returnValue: &Metrics{},
-				valueExist: true,
 			},
 		},
 		{
@@ -32,92 +30,20 @@ func TestNewMetric(t *testing.T) {
 			metricType: "myType",
 			want: want {
 				returnValue: nil,
-				valueExist: false,
 			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			value, ok := NewMetric(tc.metricType, tc.metricID)
-			if ok {
+			value, err := NewMetric(tc.metricType, tc.metricID)
+			if err == nil {
 				assert.IsType(t, tc.want.returnValue, value)
+				assert.NoError(t, err)
 			} else {
 				assert.Equal(t, tc.want.returnValue, value)
+				assert.Error(t, err)
 			}
-			assert.Equal(t, tc.want.valueExist, ok)
-		})
-	}
-}
-
-func TestFindMetric(t *testing.T) {
-	metric := Metrics{ID: "Test", MType: Gauge, Value: new(float64)}
-	metricsStorage.Set("gaugeTest", &metric)
-
-	type want struct {
-		returnValue *Metrics
-		valueExist bool
-	}
-
-	testCases := []struct {
-		name string
-		metricID string
-		metricType string
-		want want
-	}{
-		{
-			name: "Test find metric that exists",
-			metricID: "Test",
-			metricType: Gauge,
-			want: want {
-				returnValue: &metric,
-				valueExist: true,
-			},
-		},
-		{
-			name: "Test find metric that doesn't exist",
-			metricID: "Test2",
-			metricType: Gauge,
-			want: want {
-				returnValue: nil,
-				valueExist: false,
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			value, ok := FindMetric(tc.metricType, tc.metricID)
-			assert.Equal(t, tc.want.returnValue, value)
-			assert.Equal(t, tc.want.valueExist, ok)
-		})
-	}
-}
-
-func TestSave(t *testing.T) {
-	metric1 := Metrics{ID: "Test5", MType: Gauge, Value: new(float64)}
-
-	type want struct {
-		storedValue *Metrics
-	}
-
-	testCases := []struct {
-		name string
-		want want
-	}{
-		{
-			name: "Test save metrics",
-			want: want {
-				storedValue: &metric1,
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			metric1.Save()
-			value, _ := metricsStorage.Get(metric1.MType + metric1.ID)
-			assert.Equal(t, tc.want.storedValue, value)
 		})
 	}
 }
@@ -132,7 +58,7 @@ func TestUpdate(t *testing.T) {
 	type want struct {
 		metricValue any
 		pointerChanged bool
-		updateSuccess bool
+		returnError bool
 	}
 
 	testCases := []struct {
@@ -148,7 +74,6 @@ func TestUpdate(t *testing.T) {
 			want: want {
 				metricValue: float64(5.0),
 				pointerChanged: true,
-				updateSuccess: true,
 			},
 		},
 		{
@@ -158,7 +83,6 @@ func TestUpdate(t *testing.T) {
 			want: want {
 				metricValue: float64(5.0),
 				pointerChanged: false,
-				updateSuccess: true,
 			},
 		},
 		{
@@ -168,7 +92,7 @@ func TestUpdate(t *testing.T) {
 			want: want {
 				metricValue: float64(5.0),
 				pointerChanged: false,
-				updateSuccess: false,
+				returnError: true,
 			},
 		},
 		{
@@ -178,7 +102,6 @@ func TestUpdate(t *testing.T) {
 			want: want {
 				metricValue: int64(5),
 				pointerChanged: true,
-				updateSuccess: true,
 			},
 		},
 		{
@@ -188,7 +111,6 @@ func TestUpdate(t *testing.T) {
 			want: want {
 				metricValue: int64(5),
 				pointerChanged: false,
-				updateSuccess: true,
 			},
 		},
 		{
@@ -198,7 +120,7 @@ func TestUpdate(t *testing.T) {
 			want: want {
 				metricValue: int64(5),
 				pointerChanged: false,
-				updateSuccess: false,
+				returnError: true,
 			},
 		},
 		{
@@ -207,7 +129,7 @@ func TestUpdate(t *testing.T) {
 			newValue: "5",
 			want: want {
 				pointerChanged: false,
-				updateSuccess: false,
+				returnError: true,
 			},
 		},
 	}
@@ -217,28 +139,36 @@ func TestUpdate(t *testing.T) {
 			switch tc.metric.MType {
 			case Gauge:
 				oldPtr := tc.metric.Value
-				success := tc.metric.Update(tc.newValue)
+				err := tc.metric.Update(tc.newValue)
 				newPtr := tc.metric.Value
 
 				pointerChanged := oldPtr != newPtr
 
 				assert.Equal(t, tc.want.metricValue, *tc.metric.Value)
 				assert.Equal(t, tc.want.pointerChanged, pointerChanged)
-				assert.Equal(t, tc.want.updateSuccess, success)
+				if tc.want.returnError {
+					assert.Error(t, err)
+				} else {
+					assert.NoError(t, err)
+				}
 			case Counter:
 				oldPtr := tc.metric.Delta
-				success := tc.metric.Update(tc.newValue)
+				err := tc.metric.Update(tc.newValue)
 				newPtr := tc.metric.Delta
 
 				pointerChanged := oldPtr != newPtr
 
 				assert.Equal(t, tc.want.metricValue, *tc.metric.Delta)
 				assert.Equal(t, tc.want.pointerChanged, pointerChanged)
-				assert.Equal(t, tc.want.updateSuccess, success)
+				if tc.want.returnError {
+					assert.Error(t, err)
+				} else {
+					assert.NoError(t, err)
+				}
 			default:
 				oldPtrValue := tc.metric.Value
 				oldPtrDelta := tc.metric.Delta
-				success := tc.metric.Update(tc.newValue)
+				err := tc.metric.Update(tc.newValue)
 				newPtrValue := tc.metric.Value
 				newPtrDelta := tc.metric.Delta
 				pointerChanged := oldPtrValue != newPtrValue || oldPtrDelta != newPtrDelta
@@ -246,7 +176,7 @@ func TestUpdate(t *testing.T) {
 				assert.Nil(t, tc.metric.Value)
 				assert.Nil(t, tc.metric.Delta)
 				assert.Equal(t, tc.want.pointerChanged, pointerChanged)
-				assert.Equal(t, tc.want.updateSuccess, success)
+				assert.Error(t, err)
 			}
 		})
 	}
@@ -312,18 +242,6 @@ func TestStringValue(t *testing.T) {
 			assert.Equal(t, tc.want.returnValue, tc.metric.StringValue())
 		})
 	}
-}
-
-func TestAllMetrics(t *testing.T) {
-	t.Run("Should iterate through all metrics", func(t *testing.T) {
-		for v:= range AllMetrics() {
-			assert.IsType(t, Metrics{}, *v)
-		}
-		for v := range AllMetrics() {
-			assert.NotNil(t, v)
-			break
-		}
-	})
 }
 
 func TestString(t *testing.T) {

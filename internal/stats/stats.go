@@ -119,7 +119,7 @@ func(s *Stats) AllMetrics() iter.Seq[*models.Metrics] {
 	}
 }
 
-func(s *Stats) Update() {
+func(s *Stats) Update() error {
 	runtime.ReadMemStats(s.memstats)
 
 	*s.Alloc = float64(s.memstats.Alloc)
@@ -135,7 +135,7 @@ func(s *Stats) Update() {
 	*s.HeapSys = float64(s.memstats.HeapSys)
 	*s.LastGC = float64(s.memstats.LastGC)
 	*s.Lookups = float64(s.memstats.Lookups)
-	*s.MCacheSys = float64(s.memstats.MCacheInuse)
+	*s.MCacheInuse = float64(s.memstats.MCacheInuse)
 	*s.MCacheSys = float64(s.memstats.MCacheSys)
 	*s.MSpanInuse = float64(s.memstats.MSpanInuse)
 	*s.MSpanSys = float64(s.memstats.MSpanSys)
@@ -152,4 +152,6 @@ func(s *Stats) Update() {
 
 	*s.PollCount += 1
 	*s.RandomValue = rand.Float64()
+
+	return nil
 }

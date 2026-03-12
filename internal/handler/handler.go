@@ -8,11 +8,26 @@ import(
 	"strings"
 	"context"
 	"fmt"
+	"iter"
 )
 
-type metricsController struct {}
+type metricsStorage interface {
+ Set(string, *models.Metrics)
+ Get(string) (*models.Metrics, bool)
+ Remove(string)
+ All() iter.Seq[*models.Metrics]
+}
+
+type metricsController struct {
+	storage metricsStorage
+}
+
+func NewMetricsController(storage metricsStorage) *metricsController {
+	return &metricsController{storage: storage}
+}
 
 type ctxKey string
+
 const(
 	metricKey ctxKey = "metric"
 	metricTypeKey ctxKey = "metricType"
@@ -26,20 +41,16 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 	mux.Get("/", c.listAll)
 	mux.Route("/value/{metricType}/{metricName}", func(r chi.Router) {
 		r.Use(metricTypeCtx)
-		r.Use(metricNameCtx)
+		r.Use(c.metricNameCtx)
 		r.Get("/", c.get)
 	})
 	mux.Route("/update/{metricType}/{metricName}/{metricValue}", func(r chi.Router) {
 		r.Use(textPlainTypeCheck)
 		r.Use(metricTypeCtx)
-		r.Use(metricNameCtx)
+		r.Use(c.metricNameCtx)
 		r.Use(metricValueCtx)
 		r.Post("/", c.update)
 	})}
-
-func NewController() *metricsController {
-	return &metricsController{}
-}
 
 func metricTypeCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +67,7 @@ func metricTypeCtx(next http.Handler) http.Handler {
 	})
 }
 
-func metricNameCtx(next http.Handler) http.Handler {
+func (c *metricsController) metricNameCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metricName := chi.URLParam(r, string(metricNameKey))
 		
@@ -66,7 +77,7 @@ func metricNameCtx(next http.Handler) http.Handler {
 		}
 
 		var ctx context.Context
-		metric, ok := models.FindMetric(r.Context().Value(metricTypeKey).(string), metricName)
+		metric, ok := c.storage.Get(r.Context().Value(metricTypeKey).(string) + metricName)
 
 		if ok {
 			ctx = context.WithValue(r.Context(), metricKey, metric)
@@ -109,15 +120,11 @@ func textPlainTypeCheck(next http.Handler) http.Handler {
 	})
 }
 
-func NewMetricsController() metricsController {
-	return metricsController{}
-}
-
 func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html;")
 	var body string
 	body += "<html><body>"
-	for v := range models.AllMetrics() {
+	for v := range c.storage.All() {
 		body += fmt.Sprintf("<p>%s</p>", v.String())
 	}
 	body += "</body></html>"
@@ -136,18 +143,24 @@ func (c *metricsController) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
+	var err error
 	ctx := r.Context()
 	metric, metricOk := ctx.Value(metricKey).(*models.Metrics)
 	newMetric := !metricOk
 
-	if !metricOk {
-		metric, metricOk = models.NewMetric(ctx.Value(metricTypeKey).(string), ctx.Value(metricNameKey).(string))
+	if newMetric {
+		metric, err = models.NewMetric(ctx.Value(metricTypeKey).(string), ctx.Value(metricNameKey).(string))
+		if err == nil {
+			metricOk = true
+		}
 	}
 
 	metricValue, valOk := ctx.Value(metricValueKey).(string)
 
-	if metricOk && valOk && metric.Update(metricValue) {
-		if newMetric { metric.Save() }
+	err = metric.Update(metricValue)
+
+	if metricOk && valOk && (err == nil) {
+		if newMetric { c.storage.Set(metric.MType + metric.ID, metric) }
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 	}

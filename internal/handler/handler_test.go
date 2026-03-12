@@ -8,11 +8,12 @@ import(
 	"github.com/stretchr/testify/assert"
 	"github.com/go-chi/chi/v5"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/storage"
 )
 
 
 func TestUpdate(t *testing.T) {
-	c := NewController()
+	c := NewMetricsController(storage.NewStorage[*models.Metrics]())
 	testCases := []struct {
 		name string
 		method string
@@ -190,7 +191,7 @@ func TestUpdate(t *testing.T) {
 			w := httptest.NewRecorder()
 			for _, v := range tc.metrics {
 
-				v.Save()
+				c.storage.Set(v.MType + v.ID, &v)
 			}
 
 			mux.ServeHTTP(w, r)

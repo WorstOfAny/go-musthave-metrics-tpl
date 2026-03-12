@@ -19,7 +19,12 @@ func TestPost(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(""))
 	}))
-	defer ts.Close()	
 
-	c.Post(ts.URL)
+	err := c.Post(ts.URL)
+	assert.NoError(t, err)
+
+	ts.Close()
+
+	err = c.Post(ts.URL)
+	assert.Error(t, err)
 }

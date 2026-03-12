@@ -1,9 +1,7 @@
 package models
 
 import(
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/storage"
 	"strconv"
-	"iter"
 	"fmt"
 )
 
@@ -26,62 +24,46 @@ type Metrics struct {
 	Hash  string   `json:"hash,omitempty"`
 }
 
-var metricsStorage = storage.NewStorage[*Metrics](nil)
-
-func NewMetric(mtype string, id string) (*Metrics, bool) {
+func NewMetric(mtype string, id string) (*Metrics, error) {
 	switch mtype {
 		case Gauge, Counter:
-			return &Metrics{ID: id, MType: mtype }, true
+			return &Metrics{ID: id, MType: mtype }, nil
 		default:
-			return nil, false
+			return nil, fmt.Errorf("unknown type")
 	}
 }
 
-func FindMetric(mtype string, id string) (m *Metrics, ok bool) {
-	m, ok = metricsStorage.Get(mtype + id)
-	return m, ok
-}
-
-func (m *Metrics) Save() {
-	metricsStorage.Set(m.MType + m.ID, m)
-}
-
-func AllMetrics() iter.Seq[*Metrics] {
-	return func(yield func(*Metrics) bool) {
-		for v := range metricsStorage.All() {
-			if !yield(v) { return }
-		}
-	}
-}
-
-func (m *Metrics) Update(value string) (success bool) {
+func (m *Metrics) Update(value string) error {
+	var err error
 	switch m.MType {
 		case Gauge:
-			if newValue, err := strconv.ParseFloat(value, 64); err == nil {
+			if newValue, parseErr := strconv.ParseFloat(value, 64); parseErr == nil {
 				if m.Value == nil {
 					m.Value = &newValue
 				} else {
 					*m.Value = newValue
 				}
-				success = true
+			} else {
+				err = parseErr
 			}
 		case Counter:
-			if newValue, err := strconv.ParseInt(value, 10, 64); err == nil {
+			if newValue, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil {
 				if m.Delta == nil {
 					m.Delta = &newValue
 				} else {
 					*m.Delta += newValue
 				}
-				success = true
+			} else {
+				err = parseErr
 			}
+		default:
+			err = fmt.Errorf("unknown type")
 	}
 
-	return success
+	return err
 }
 
-func (m *Metrics) StringValue() string {
-	var result string
-
+func (m *Metrics) StringValue() (result string) {
 	switch m.MType {
 	case Gauge:
 		if m.Value == nil { return result }

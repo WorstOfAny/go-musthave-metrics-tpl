@@ -3,7 +3,6 @@ package storage
 import "iter"
 
 type memStorage[T any] struct {
-	l interface { Log(message ...any) }
 	ds map[string]T
 }
 
@@ -20,8 +19,8 @@ func (s *memStorage[T]) Remove(k string) {
 	delete(s.ds, k)
 }
 
-func NewStorage[T any](l interface { Log(message ...any) }) (*memStorage[T]) {
-	return &memStorage[T]{l: l, ds: map[string]T{}}
+func NewStorage[T any]() (*memStorage[T]) {
+	return &memStorage[T]{ds: map[string]T{}}
 }
 
 func (s *memStorage[T]) All() iter.Seq[T] {

@@ -34,8 +34,12 @@ func (c *Client) Post(u string, body []byte) error {
 		SetHeader("Accept-Encoding", "gzip").
 		SetBody(cbody.Bytes()).
 		Post(u)
-	if err != nil { return err }
+	if err != nil {
+		log.Info().Err(err).Msg("")
+		return err
+	}
 	defer resp.RawResponse.Body.Close()
+	
 	gr, err := gzip.NewReader(resp.RawResponse.Body)
 	if err != nil {
 		log.Info().Err(err).Msg("")

@@ -75,7 +75,7 @@ func TestRun(t *testing.T) {
 func TestReportMetrics(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(""))
 	}))

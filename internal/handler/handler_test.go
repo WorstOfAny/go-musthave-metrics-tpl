@@ -94,9 +94,11 @@ func TestListAll(t *testing.T) {
 
 	val := 1.1
 
-	(&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val}).Save()
+	mcs := []*models.Metrics{
+		&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val},
+	}
 
-	runCases(t, testCases)
+	runCases(t, testCases, mcs)
 }
 
 func TestShowTextPlain(t *testing.T) {
@@ -147,9 +149,11 @@ func TestShowTextPlain(t *testing.T) {
 
 	val := 1.1
 
-	(&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val}).Save()
+	mcs := []*models.Metrics{
+		&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val},
+	}
 
-	runCases(t, testCases)
+	runCases(t, testCases, mcs)
 }
 
 func TestShowJSON(t *testing.T) {
@@ -213,11 +217,14 @@ func TestShowJSON(t *testing.T) {
 	counterVal := int64(5)
 	brokenVal := math.NaN()
 
-	(&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &gaugeVal}).Save()
-	(&models.Metrics{ID:"BrokenGauge", MType: models.Gauge, Value: &brokenVal}).Save()
-	(&models.Metrics{ID:"MyCounter", MType: models.Counter, Delta: &counterVal}).Save()
+	mcs := []*models.Metrics{
+		&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &gaugeVal},
+		&models.Metrics{ID:"BrokenGauge", MType: models.Gauge, Value: &brokenVal},
+		&models.Metrics{ID:"MyCounter", MType: models.Counter, Delta: &counterVal},
+	}
 
-	runCases(t, testCases)
+
+	runCases(t, testCases, mcs)
 }
 
 func TestUpdate(t *testing.T) {
@@ -353,16 +360,21 @@ func TestUpdate(t *testing.T) {
 	}
 
 
-	(&models.Metrics{ID:"MyGauge", MType: models.Gauge}).Save()
-	(&models.Metrics{ID:"MyCounter", MType: models.Counter}).Save()
+	mcs := []*models.Metrics{
+		&models.Metrics{ID:"MyGauge", MType: models.Gauge},
+		&models.Metrics{ID:"MyCounter", MType: models.Counter},
+	}
 
-	runCases(t, testCases)
+	runCases(t, testCases, mcs)
 
 }
 
-func runCases(t *testing.T, cases []requestCase) {
+func runCases(t *testing.T, cases []requestCase, metrics []*models.Metrics) {
 	for _, tc := range cases {
 		c := NewMetricsController(storage.NewStorage[*models.Metrics]())
+		for _, v := range metrics {
+			c.storage.Set(v.MType + v.ID, v)
+		}
 		mux := chi.NewRouter()
 		c.ApplyTo(mux)
 		t.Run(tc.name, func(t *testing.T) {

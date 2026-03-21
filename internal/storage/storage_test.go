@@ -4,6 +4,11 @@ import(
 	"testing"
 	"github.com/stretchr/testify/assert"
 	"fmt"
+	"os"
+	"bufio"
+	"encoding/json"
+	"time"
+	"context"
 )
 
 type myInt int64
@@ -18,7 +23,14 @@ func (i myInt) Key() string {
 
 func TestNewStorage (t *testing.T) {
 	t.Run("Create int64 Storage", func(t *testing.T) {
-		s := NewStorage[*myInt]()
+		tmpFile, err := os.CreateTemp("", "*.json")
+		defer os.Remove(tmpFile.Name())
+
+		if err != nil { t.Fatal(err) }
+
+		s, err := NewStorage[*myInt](tmpFile, false)
+
+		if err != nil { t.Fatal(err) }
 
 		if s.ds == nil {
 			t.Fatal("Map didn't initialized")
@@ -29,7 +41,14 @@ func TestNewStorage (t *testing.T) {
 }
 
 func TestSet(t *testing.T) {
-	storage := NewStorage[*myInt]()
+	tmpFile, err := os.CreateTemp("", "*.json")
+	defer os.Remove(tmpFile.Name())
+
+	if err != nil { t.Fatal(err) }
+
+	storage, err := NewStorage[*myInt](tmpFile, false)
+
+	if err != nil { t.Fatal(err) }
 
 	type want struct {
 		storedValue myInt
@@ -57,7 +76,14 @@ func TestSet(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	storage := NewStorage[myInt]()
+	tmpFile, err := os.CreateTemp("", "*.json")
+	defer os.Remove(tmpFile.Name())
+
+	if err != nil { t.Fatal(err) }
+
+	storage, err := NewStorage[myInt](tmpFile, false)
+	if err != nil { t.Fatal(err) }
+
 	m := myInt(1)
 	storage.Set(m.Key(), m)
 
@@ -93,7 +119,14 @@ func TestGet(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	storage := NewStorage[*myInt]()
+	tmpFile, err := os.CreateTemp("", "*.json")
+	defer os.Remove(tmpFile.Name())
+
+	if err != nil { t.Fatal(err) }
+
+	storage, err := NewStorage[*myInt](tmpFile, false)
+	if err != nil { t.Fatal(err) }
+
 	testInt := myInt(2)
 
 	storage.Set(testInt.Key(), &testInt)
@@ -116,7 +149,13 @@ func TestRemove(t *testing.T) {
 }
 
 func TestAll(t *testing.T) {
-	st := NewStorage[myInt]()
+	tmpFile, err := os.CreateTemp("", "*.json")
+	defer os.Remove(tmpFile.Name())
+
+	if err != nil { t.Fatal(err) }
+
+	st, err := NewStorage[myInt](tmpFile, false)
+	if err != nil { t.Fatal(err) }
 
 	st.Set("1", myInt(1))
 	st.Set("2", myInt(2))
@@ -129,5 +168,84 @@ func TestAll(t *testing.T) {
 			assert.NotNil(t, v)
 			break
 		}
+	})
+}
+
+func TestRestore(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "*.json")
+	defer os.Remove(tmpFile.Name())
+
+	if err != nil { t.Fatal(err) }
+
+	writer := bufio.NewWriter(tmpFile)
+
+	firstVal := myInt(1)
+	marshalFirstVal, err := json.Marshal(&firstVal)
+	if err != nil { t.Fatal(err) }
+
+	secondVal := myInt(2)
+	marshalSecondVal, err := json.Marshal(&secondVal)
+	if err != nil { t.Fatal(err) }
+
+	_, err = writer.Write(marshalFirstVal)
+	if err != nil { t.Fatal(err) }
+
+	err = writer.WriteByte('\n')
+	if err != nil { t.Fatal(err) }
+
+	_, err = writer.Write(marshalSecondVal)
+	if err != nil { t.Fatal(err) }
+
+	err = writer.WriteByte('\n')
+	if err != nil { t.Fatal(err) }
+
+	writer.Flush()
+
+	tmpFile.Seek(0,0)
+
+	st, err := NewStorage[*myInt](tmpFile, true)
+	if err != nil { t.Fatal(err) }
+
+	t.Run("Should restore storage from file", func(t *testing.T) {
+		val, exist := st.Get("1")
+		assert.Equal(t, &firstVal, val)
+		assert.NotNil(t, val)
+		assert.True(t, exist)
+
+		val, exist = st.Get("2")
+		assert.Equal(t, &secondVal, val)
+		assert.NotNil(t, val)
+		assert.True(t, exist)
+	})
+}
+
+func TestWriteToFile(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "*.json")
+	defer os.Remove(tmpFile.Name())
+
+	if err != nil { t.Fatal(err) }
+
+	st, err := NewStorage[myInt](tmpFile, false)
+	if err != nil { t.Fatal(err) }
+
+	st.Set("1", myInt(1))
+	st.Set("2", myInt(2))
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	errCh := make(chan error, 2)
+
+	go st.WriteToFile(ctx, errCh, 5 * time.Second)
+
+	time.Sleep(6 * time.Second)
+	t.Run("Should write to file", func(t *testing.T) {
+		tmpFile.Seek(0, 0)
+
+		scanner := bufio.NewScanner(tmpFile)
+
+		assert.True(t, scanner.Scan())
+		assert.NoError(t, scanner.Err())
+		
 	})
 }

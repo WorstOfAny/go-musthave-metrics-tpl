@@ -93,7 +93,13 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 func logRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		reqDump, _ := httputil.DumpRequest(r, true)
+		reqDump, err := httputil.DumpRequest(r, true)
+
+		if err != nil {
+			log.Debug().
+				Err(err).
+				Msg("dump request error")
+		}
 
 		fmt.Println(string(reqDump))
 		responseD := &responseData{status: http.StatusOK}
@@ -120,17 +126,18 @@ func decodeRequest(next http.Handler) http.Handler {
 			return
 		}
 
-		gz , err := gzip.NewReader(r.Body)
+		gz, err := gzip.NewReader(r.Body)
+		defer gz.Close()
 
 		if err != nil {
+			log.Debug().
+				Err(err).
+				Msg("gzip reader error")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		defer gz.Close()
-
 		r.Body = gz
-
 		next.ServeHTTP(w, r)
 	})
 }
@@ -143,14 +150,16 @@ func encodeResponse(next http.Handler) http.Handler {
 		}
 
 		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		defer gz.Close()
 
 		if err != nil {
-			io.WriteString(w, err.Error())
+			log.Debug().
+				Err(err).
+				Msg("gzip writer error")
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		defer gz.Close()
-		
 		w.Header().Set("Content-Encoding", "gzip")
 
 		next.ServeHTTP(gzipWriter{ResponseWriter: w, Writer: gz}, r)
@@ -163,7 +172,9 @@ func (c *metricsController) jsonCtx(next http.Handler) http.Handler {
 		dec := json.NewDecoder(r.Body)
 
 		if err := dec.Decode(&reqMetric); err != nil {
-			log.Debug().Err(err).Msg("")
+			log.Debug().
+				Err(err).
+				Msg("json decode error")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -291,7 +302,11 @@ func (c *metricsController) showJSON(w http.ResponseWriter, r *http.Request) {
 		body, err := json.Marshal(metric)
 
 		if err != nil {
-			log.Debug().Err(err).Msg("")
+			log.Debug().
+				Err(err).
+				Str("metricID", metric.ID).
+				Str("metricType", metric.MType).
+				Msg("marshal error")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -331,7 +346,18 @@ func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
 
 	if metricOk && valOk && (err == nil) {
 		if newMetric { c.storage.Set(metric.MType + metric.ID, metric) }
-		response, _ := json.Marshal(metric)
+		response, err := json.Marshal(metric)
+
+		if err != nil {
+			log.Debug().
+				Err(err).
+				Str("metricID", metric.ID).
+				Str("metricType", metric.MType).
+				Msg("marshal error")
+				w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		w.Write(response)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)

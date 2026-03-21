@@ -7,12 +7,15 @@ import(
 	"context"
 	"net/url"
 	"encoding/json"
+	"sync"
+	"github.com/rs/zerolog/log"
 )
 
 type agent struct {
 	stats *stats.Stats
 	client *client.Client
 	reportURL *url.URL
+	mu sync.Mutex
 	UpdateWorker *worker
 	ReportWorker *worker
 }
@@ -32,6 +35,7 @@ func NewAgent(reportAddr string) *agent {
 
 type worker struct {
 	action func() error
+	mu sync.Mutex
 }
 
 func (w *worker) Run(ctx context.Context, errCh chan error, delay time.Duration) (err error) {
@@ -39,17 +43,26 @@ func (w *worker) Run(ctx context.Context, errCh chan error, delay time.Duration)
 		select {
 			case <-ctx.Done(): return
 			case <-time.After(delay):
+				w.mu.Lock()
 				err = w.action()
-				if err != nil { errCh <- err }
+				if err != nil {
+					log.Debug().Err(err).Msg("worker action err")
+					errCh <- err
+					return
+				}
+				w.mu.Unlock()
 		}
 	}
 }
 
 func (a *agent) reportMetrics() (err error) {
+	a.mu.Lock()
 	for metric := range a.stats.AllMetrics() {
-		body, _ := json.Marshal(metric)
+		var body []byte
+		body, err = json.Marshal(metric)
 		err = a.client.Post(a.reportURL.String() + "/update", body)
 	}
 	*a.stats.PollCount = 0
+	a.mu.Unlock()
 	return err
 }

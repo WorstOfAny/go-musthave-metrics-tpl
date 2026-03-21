@@ -3,6 +3,7 @@ package main
 import(
 	"flag"
 	"github.com/caarlos0/env/v11"
+	"fmt"
 )
 
 var flagRunAddr string
@@ -17,8 +18,7 @@ type config struct {
 	RestoreStorage *bool `env:"RESTORE"`
 }
 
-func parseFlags() {
-
+func parseFlags() (err error) {
 	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
 	flag.IntVar(&flagStoreInterval, "i", 300, "Write storage to restore file interval in seconds")
 	flag.StringVar(&flagFileStoragePath, "f", "store.json", "Storage restore file")
@@ -26,9 +26,15 @@ func parseFlags() {
 	flag.Parse()
 
 	var cfg config
-	_ = env.Parse(&cfg)
+	err = env.Parse(&cfg)
+	if err != nil {
+		return fmt.Errorf("failed to read configuration from environment variables: %w", err)
+	}
+
 	if cfg.RunAddr != nil { flagRunAddr = *cfg.RunAddr }
 	if cfg.StoreInterval != nil { flagStoreInterval = *cfg.StoreInterval }
 	if cfg.FileStoragePath != nil { flagFileStoragePath = *cfg.FileStoragePath }
 	if cfg.RestoreStorage != nil { flagRestoreStorage = *cfg.RestoreStorage }
+
+	return nil
 }

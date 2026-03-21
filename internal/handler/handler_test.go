@@ -11,6 +11,7 @@ import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/storage"
 	"math"
+	"os"
 )
 
 type want struct {
@@ -372,7 +373,15 @@ func TestUpdate(t *testing.T) {
 
 func runCases(t *testing.T, cases []requestCase, metrics []*models.Metrics) {
 	for _, tc := range cases {
-		c := NewMetricsController(storage.NewStorage[*models.Metrics]())
+		tmpFile, err := os.CreateTemp("", "*.json")
+		defer os.Remove(tmpFile.Name())
+
+		if err != nil { t.Fatal(err) }
+
+		st, err := storage.NewStorage[*models.Metrics](tmpFile, false)
+		if err != nil { t.Fatal(err) }
+
+		c := NewMetricsController(st)
 		for _, v := range metrics {
 			c.storage.Set(v.MType + v.ID, v)
 		}

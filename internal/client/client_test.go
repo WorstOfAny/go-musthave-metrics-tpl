@@ -4,6 +4,7 @@ import(
 	"net/http/httptest"
 	"net/http"
 	"testing"
+	"compress/gzip"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -15,16 +16,18 @@ func TestPost(t *testing.T) {
 	c := NewClient()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(""))
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		gz.Write([]byte("{\"a\": 1}"))
 	}))
 
-	err := c.Post(ts.URL)
+	err := c.Post(ts.URL, []byte("{}"))
 	assert.NoError(t, err)
 
 	ts.Close()
 
-	err = c.Post(ts.URL)
+	err = c.Post(ts.URL, []byte("{}"))
 	assert.Error(t, err)
 }

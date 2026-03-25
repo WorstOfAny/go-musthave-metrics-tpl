@@ -79,3 +79,7 @@ func (m *Metrics) StringValue() (result string) {
 func (m *Metrics) String() string {
 	return fmt.Sprintf("%s %s: %s", m.MType, m.ID, m.StringValue())
 }
+
+func (m *Metrics) Key() string {
+	return m.MType + m.ID
+}

@@ -11,7 +11,27 @@ import(
 	"os/signal"
 	"syscall"
 	"errors"
+	"sync"
 )
+
+type Counter struct {
+	mu sync.Mutex
+	count int64
+}
+
+func (c *Counter) Incr() {
+	c.mu.Lock()
+	c.count++
+	c.mu.Unlock()
+}
+
+func (c *Counter) Count() int64 {
+	c.mu.Lock()
+	count := c.count
+	c.mu.Unlock()
+
+	return count
+}
 
 func TestRun(t *testing.T) {
 	type want struct {
@@ -38,15 +58,16 @@ func TestRun(t *testing.T) {
 		},
 	}
 
+
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			callTimes := 0
+			callTimes := &Counter{}
 			errCh := make(chan error, 1)
 
 			ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancelFunc()
 
-			worker := worker{action: func() error { callTimes++; return tc.err }}
+			worker := worker{action: func() error { callTimes.Incr(); return tc.err }}
 			go worker.Run(ctx, errCh, 1 * time.Second)
 			time.Sleep(4 * time.Second + 5 * time.Millisecond)
 
@@ -64,7 +85,7 @@ func TestRun(t *testing.T) {
 					}
 				case <- ctx.Done():
 					assert.Equal(t, context.Canceled, ctx.Err())
-					assert.Equal(t, 4, callTimes)
+					assert.Equal(t, int64(4), callTimes.Count())
 				case <- time.After(2 * time.Second):
 					t.Error("контекст не реагирует на сигнал")
 			}
@@ -75,7 +96,7 @@ func TestRun(t *testing.T) {
 func TestReportMetrics(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(""))
 	}))

@@ -5,11 +5,13 @@ import(
 	"math/rand"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"iter"
+	"sync"
 )
 
 type Stats struct {
 	memstats *runtime.MemStats
 	metrics [29]models.Metrics
+	mu sync.Mutex
 
 	Alloc *float64
 	BuckHashSys *float64
@@ -120,6 +122,7 @@ func(s *Stats) AllMetrics() iter.Seq[*models.Metrics] {
 }
 
 func(s *Stats) Update() error {
+	s.mu.Lock()
 	runtime.ReadMemStats(s.memstats)
 
 	*s.Alloc = float64(s.memstats.Alloc)
@@ -152,6 +155,7 @@ func(s *Stats) Update() error {
 
 	*s.PollCount += 1
 	*s.RandomValue = rand.Float64()
+	s.mu.Unlock()
 
 	return nil
 }

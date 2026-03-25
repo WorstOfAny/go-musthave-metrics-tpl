@@ -251,3 +251,11 @@ func TestString(t *testing.T) {
 		assert.Equal(t, "gauge MyM: 0", m.String())
 	})
 }
+
+func TestKey(t *testing.T) {
+	m := Metrics{ID: "ID", MType: "gauge"}
+
+	t.Run("Should return string MType concatenated with ID", func(t *testing.T) {
+		assert.Equal(t, "gaugeID", m.Key())
+	})
+}

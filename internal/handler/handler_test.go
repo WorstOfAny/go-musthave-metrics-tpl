@@ -9,7 +9,9 @@ import(
 	"github.com/stretchr/testify/assert"
 	"github.com/go-chi/chi/v5"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler/mocks"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/storage"
+	"go.uber.org/mock/gomock"
 	"math"
 	"os"
 )
@@ -381,7 +383,10 @@ func runCases(t *testing.T, cases []requestCase, metrics []*models.Metrics) {
 		st, err := storage.NewStorage[*models.Metrics](tmpFile, false)
 		if err != nil { t.Fatal(err) }
 
-		c := NewMetricsController(st)
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		db := mocks.NewMockDB(ctrl)
+		c := NewMetricsController(st, db)
 		for _, v := range metrics {
 			c.storage.Set(v.MType + v.ID, v)
 		}

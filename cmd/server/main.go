@@ -13,6 +13,8 @@ import(
 	"syscall"
 	"fmt"
 	"github.com/rs/zerolog/log"
+	"database/sql"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -26,24 +28,28 @@ func run() (err error) {
 	err = parseFlags()
 	if err != nil { return err }
 
-	file, err := os.OpenFile(flagFileStoragePath, os.O_RDWR|os.O_CREATE, 0666)
-	defer file.Close()
+	db, err := sql.Open("pgx", cfg.DatabaseDSN)
 	if err != nil { return err }
+	defer db.Close()
+
+	file, err := os.OpenFile(cfg.FileStoragePath, os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil { return err }
+	defer file.Close()
 
 	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancelFunc()
 
-	st, err := storage.NewStorage[*models.Metrics](file, flagRestoreStorage)
+	st, err := storage.NewStorage[*models.Metrics](file, cfg.RestoreStorage)
 	if err != nil { return err }
 
 	errCh := make(chan error, 2)
-	go st.WriteToFile(ctx, errCh, time.Duration(flagStoreInterval) * time.Second)
+	go st.WriteToFile(ctx, errCh, time.Duration(cfg.StoreInterval) * time.Second)
 
-	c := handler.NewMetricsController(st)
+	c := handler.NewMetricsController(st, db)
 	r := chi.NewRouter()
 	c.ApplyTo(r)
 
-	go runServer(errCh, flagRunAddr, r)
+	go runServer(errCh, cfg.RunAddr, r)
 
 	for {
 		select {

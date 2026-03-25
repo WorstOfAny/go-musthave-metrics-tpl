@@ -6,35 +6,41 @@ import(
 	"fmt"
 )
 
-var flagRunAddr string
-var flagStoreInterval int
-var flagFileStoragePath string
-var flagRestoreStorage bool
+//type dbConfig struct {
+//	Host *string `env:"HOST"`
+//	Port *int `env:"PORT"`
+//	User *string `env:"USER"`
+//	Password *string `env:"PASSWORD"`
+//	Name *string `env:"NAME"`
+//}
 
 type config struct {
-	RunAddr *string `env:"ADDRESS"`
-	StoreInterval *int `env:"STORE_INTERVAL"`
-	FileStoragePath *string `env:"FILE_STORAGE_PATH"`
-	RestoreStorage *bool `env:"RESTORE"`
+	RunAddr string `env:"ADDRESS"`
+	StoreInterval int `env:"STORE_INTERVAL"`
+	FileStoragePath string `env:"FILE_STORAGE_PATH"`
+	RestoreStorage bool `env:"RESTORE"`
+	DatabaseDSN string `env:"DATABASE_DSN"`
+	//DB dbConfig `envPrefix:"DATABASE_"`
 }
 
+var cfg config
+
 func parseFlags() (err error) {
-	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
-	flag.IntVar(&flagStoreInterval, "i", 300, "Write storage to restore file interval in seconds")
-	flag.StringVar(&flagFileStoragePath, "f", "store.json", "Storage restore file")
-	flag.BoolVar(&flagRestoreStorage, "r", false, "Load from storage restore file")
+	cfg = config{}
+	flag.StringVar(&cfg.RunAddr, "a", "localhost:8080", "address and port to run server")
+	flag.IntVar(&cfg.StoreInterval, "i", 300, "Write storage to restore file interval in seconds")
+	flag.StringVar(&cfg.FileStoragePath, "f", "store.json", "Storage restore file")
+	flag.BoolVar(&cfg.RestoreStorage, "r", false, "Load from storage restore file")
+	flag.StringVar(&cfg.DatabaseDSN, "d", "", "Database data source name")
 	flag.Parse()
 
-	var cfg config
+	fmt.Println(cfg)
+
 	err = env.Parse(&cfg)
 	if err != nil {
 		return fmt.Errorf("failed to read configuration from environment variables: %w", err)
 	}
-
-	if cfg.RunAddr != nil { flagRunAddr = *cfg.RunAddr }
-	if cfg.StoreInterval != nil { flagStoreInterval = *cfg.StoreInterval }
-	if cfg.FileStoragePath != nil { flagFileStoragePath = *cfg.FileStoragePath }
-	if cfg.RestoreStorage != nil { flagRestoreStorage = *cfg.RestoreStorage }
+	fmt.Println(cfg)
 
 	return nil
 }

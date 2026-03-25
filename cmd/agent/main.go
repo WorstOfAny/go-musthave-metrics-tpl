@@ -24,11 +24,11 @@ func run() (err error) {
 	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancelFunc()
 
-	a := agent.NewAgent(flagReportAddr)
+	a := agent.NewAgent(cfg.ReportAddr)
 	errCh := make(chan error, 2)
 
-	go a.UpdateWorker.Run(ctx, errCh, time.Duration(flagPollInterval) * time.Second)
-	go a.ReportWorker.Run(ctx, errCh, time.Duration(flagReportInterval) * time.Second)
+	go a.UpdateWorker.Run(ctx, errCh, time.Duration(cfg.PollInterval) * time.Second)
+	go a.ReportWorker.Run(ctx, errCh, time.Duration(cfg.ReportInterval) * time.Second)
 
 	fmt.Println("Agent working, for exit press Ctrl+C")
 

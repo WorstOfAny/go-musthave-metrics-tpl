@@ -23,12 +23,17 @@ type metricsStorage interface {
  All() iter.Seq[*models.Metrics]
 }
 
-type metricsController struct {
-	storage metricsStorage
+type DB interface {
+	Ping() error
 }
 
-func NewMetricsController(storage metricsStorage) *metricsController {
-	return &metricsController{storage: storage}
+type metricsController struct {
+	storage metricsStorage
+	db DB
+}
+
+func NewMetricsController(storage metricsStorage, db DB) *metricsController {
+	return &metricsController{storage: storage, db: db}
 }
 
 type responseData struct {
@@ -73,6 +78,7 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 	mux.Use(decodeRequest)
 	mux.Use(logRequest)
 	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)
+	mux.With(textPlainTypeSet).Get("/ping", c.ping)
 	mux.Route("/value", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.showJSON)
 		r.Route("/{metricType}/{metricName}", func(r chi.Router){
@@ -127,7 +133,6 @@ func decodeRequest(next http.Handler) http.Handler {
 		}
 
 		gz, err := gzip.NewReader(r.Body)
-		defer gz.Close()
 
 		if err != nil {
 			log.Debug().
@@ -136,6 +141,8 @@ func decodeRequest(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		defer gz.Close()
 
 		r.Body = gz
 		next.ServeHTTP(w, r)
@@ -150,7 +157,6 @@ func encodeResponse(next http.Handler) http.Handler {
 		}
 
 		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
-		defer gz.Close()
 
 		if err != nil {
 			log.Debug().
@@ -159,6 +165,8 @@ func encodeResponse(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		defer gz.Close()
 
 		w.Header().Set("Content-Encoding", "gzip")
 
@@ -354,7 +362,7 @@ func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
 				Str("metricID", metric.ID).
 				Str("metricType", metric.MType).
 				Msg("marshal error")
-				w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
@@ -362,4 +370,16 @@ func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 	}
+}
+
+func (c *metricsController) ping(w http.ResponseWriter, r *http.Request) {
+	if err := c.db.Ping(); err != nil {
+			log.Debug().
+				Err(err).
+				Msg("failed to ping database")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+	}
+
+	w.Write([]byte("Success"))
 }

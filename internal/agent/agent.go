@@ -55,13 +55,20 @@ func (w *worker) Run(ctx context.Context, errCh chan error, delay time.Duration)
 	}
 }
 
-func (a *agent) reportMetrics() (err error) {
+func (a *agent) reportMetrics() (error) {
 	a.mu.Lock()
-	for metric := range a.stats.AllMetrics() {
-		var body []byte
-		body, err = json.Marshal(metric)
-		err = a.client.Post(a.reportURL.String() + "/update", body)
-	}
+
+	body, err := json.Marshal(a.stats)
+
+	if err != nil { return err }
+
+	err = a.client.Post(a.reportURL.String() + "/updates", body)
+	
+	//for metric := range a.stats.AllMetrics() {
+	//	var body []byte
+	//	body, err = json.Marshal(metric)
+	//	err = a.client.Post(a.reportURL.String() + "/update", body)
+	//}
 	*a.stats.PollCount = 0
 	a.mu.Unlock()
 	return err

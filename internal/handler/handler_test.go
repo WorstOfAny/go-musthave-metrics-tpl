@@ -9,11 +9,11 @@ import(
 	"github.com/stretchr/testify/assert"
 	"github.com/go-chi/chi/v5"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler/mocks"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/storage"
-	"go.uber.org/mock/gomock"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
+	//"go.uber.org/mock/gomock"
 	"math"
-	"os"
+	//"os"
+	"context"
 )
 
 type want struct {
@@ -98,8 +98,8 @@ func TestListAll(t *testing.T) {
 
 	val := 1.1
 
-	mcs := []*models.Metrics{
-		&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val},
+	mcs := []models.Metrics{
+		models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val},
 	}
 
 	runCases(t, testCases, mcs)
@@ -141,7 +141,7 @@ func TestShowTextPlain(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusBadRequest, contentType: "text/plain", body: "" },
+									want: want{ code: http.StatusNotFound, contentType: "text/plain", body: "" },
 								},
 							},
 						},
@@ -153,8 +153,8 @@ func TestShowTextPlain(t *testing.T) {
 
 	val := 1.1
 
-	mcs := []*models.Metrics{
-		&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val},
+	mcs := []models.Metrics{
+		models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val},
 	}
 
 	runCases(t, testCases, mcs)
@@ -192,17 +192,17 @@ func TestShowJSON(t *testing.T) {
 								bodyCase{
 									name: "with valid json body and invalid type",
 									body: "{\"id\": \"MyGauge\", \"type\": \"MyType\"}",
-									want: want{ code: http.StatusBadRequest, contentType: "application/json", body: "" },
+									want: want{ code: http.StatusNotFound, contentType: "application/json", body: "" },
 								},
 								bodyCase{
 									name: "with invalid json body",
 									body: "{id: \"MyGauge\", type: \"gauge\"}",
-									want: want{ code: http.StatusInternalServerError, contentType: "application/json", body: "" },
+									want: want{ code: http.StatusBadRequest, contentType: "application/json", body: "" },
 								},
 								bodyCase{
 									name: "with invalid json body",
 									body: "{id: \"MyGauge\", type: \"gauge\"",
-									want: want{ code: http.StatusInternalServerError, contentType: "application/json", body: "" },
+									want: want{ code: http.StatusBadRequest, contentType: "application/json", body: "" },
 								},
 								bodyCase{
 									name: "with valid json body, but object can't be serialized",
@@ -221,10 +221,10 @@ func TestShowJSON(t *testing.T) {
 	counterVal := int64(5)
 	brokenVal := math.NaN()
 
-	mcs := []*models.Metrics{
-		&models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &gaugeVal},
-		&models.Metrics{ID:"BrokenGauge", MType: models.Gauge, Value: &brokenVal},
-		&models.Metrics{ID:"MyCounter", MType: models.Counter, Delta: &counterVal},
+	mcs := []models.Metrics{
+		models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &gaugeVal},
+		models.Metrics{ID:"BrokenGauge", MType: models.Gauge, Value: &brokenVal},
+		models.Metrics{ID:"MyCounter", MType: models.Counter, Delta: &counterVal},
 	}
 
 
@@ -329,8 +329,8 @@ func TestUpdate(t *testing.T) {
 								},
 								bodyCase{
 									name: "with invalid json body",
-									body: "{id: \"MyGauge\", type: \"gauge\", \"value\": 1.4}",
-									want: want{ code: http.StatusInternalServerError, contentType: "application/json", body: "" },
+									body: "{id: \"MyGauge\", type: \"gauge\", \"value\": 1.4",
+									want: want{ code: http.StatusBadRequest, contentType: "application/json", body: "" },
 								},
 							},
 						},
@@ -364,32 +364,24 @@ func TestUpdate(t *testing.T) {
 	}
 
 
-	mcs := []*models.Metrics{
-		&models.Metrics{ID:"MyGauge", MType: models.Gauge},
-		&models.Metrics{ID:"MyCounter", MType: models.Counter},
+	mcs := []models.Metrics{
+		models.Metrics{ID:"MyGauge", MType: models.Gauge},
+		models.Metrics{ID:"MyCounter", MType: models.Counter},
 	}
 
 	runCases(t, testCases, mcs)
 
 }
 
-func runCases(t *testing.T, cases []requestCase, metrics []*models.Metrics) {
+func runCases(t *testing.T, cases []requestCase, metrics []models.Metrics) {
 	for _, tc := range cases {
-		tmpFile, err := os.CreateTemp("", "*.json")
-		defer os.Remove(tmpFile.Name())
+		testConfig := repository.Config{StoreInterval: 10, FileStoragePath: "test_store.json", RestoreStorage: false, DatabaseDSN: ""}
+		errCh := make(chan error, 2)
+		ctx := context.Background()
+		repo := repository.NewRepository[models.Metrics](ctx, errCh, testConfig)
 
-		if err != nil { t.Fatal(err) }
-
-		st, err := storage.NewStorage[*models.Metrics](tmpFile, false)
-		if err != nil { t.Fatal(err) }
-
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-		db := mocks.NewMockDB(ctrl)
-		c := NewMetricsController(st, db)
-		for _, v := range metrics {
-			c.storage.Set(v.MType + v.ID, v)
-		}
+		c := NewMetricsController(repo)
+		for _, v := range metrics { c.storage.Set(ctx, v) }
 		mux := chi.NewRouter()
 		c.ApplyTo(mux)
 		t.Run(tc.name, func(t *testing.T) {

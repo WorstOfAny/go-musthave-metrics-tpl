@@ -3,12 +3,39 @@ package models
 import(
 	"strconv"
 	"fmt"
+	"encoding/json"
+	pgx "github.com/jackc/pgx/v5"
 )
+
+type FailReason string
 
 const (
 	Counter = "counter"
 	Gauge   = "gauge"
+	EmptyID FailReason = "Empty ID"
+	EmptyValue FailReason = "Empty value"
+	WrongType FailReason = "Wrong metric type"
+	InvalidFloat FailReason = "Invalid float"
+	InvalidInt FailReason = "Invalid int"
 )
+
+type MetricError struct {
+	Reason FailReason
+	Message string
+	Err error
+}
+
+func (e *MetricError) Error() string {
+	return e.Message
+}
+
+func (e *MetricError) Cause() FailReason {
+	return e.Reason
+}
+
+func (e *MetricError) Unwrap() error {
+	return e.Err
+}
 
 // NOTE: Не усложняем пример, вводя иерархическую вложенность структур.
 // Органичиваясь плоской моделью.
@@ -17,24 +44,59 @@ const (
 // и соответственно не кодировать в структуру.
 
 type Metrics struct {
-	ID    string   `json:"id"`
-	MType string   `json:"type"`
-	Delta *int64   `json:"delta,omitempty"`
-	Value *float64 `json:"value,omitempty"`
-	Hash  string   `json:"hash,omitempty"`
+	ID    string   `json:"id" db:"id"`
+	MType string   `json:"type" db:"mtype"`
+	Delta *int64   `json:"delta,omitempty" db:"delta"`
+	Value *float64 `json:"value,omitempty" db:"value"`
+	Hash  string   `json:"hash,omitempty" db:"hash"`
 }
 
-func NewMetric(mtype string, id string) (*Metrics, error) {
-	switch mtype {
-		case Gauge, Counter:
-			return &Metrics{ID: id, MType: mtype }, nil
-		default:
-			return nil, fmt.Errorf("unknown type")
+func NewMetric(mtype string, id string, value string) (*Metrics, error) {
+	m := &Metrics{ID: id, MType: mtype }
+	updErr := m.Update(value)
+
+	_, validErr := m.Valid()
+	if validErr != nil { return nil, validErr }
+	if updErr != nil { return nil, updErr }
+
+
+	return m, nil
+}
+
+func (m *Metrics) Valid() (bool, error) {
+	err := &MetricError{}
+	var ok bool
+	if m.ID == "" {
+		err.Reason = EmptyID
+		err.Message = "Empty ID forbidden"
+		return ok, err
 	}
+	switch m.MType {
+		case Gauge:
+			if m.Value == nil {
+				err.Reason = EmptyValue
+				err.Message = "Empty value forbidden"
+				return ok, err
+			}
+			ok = true
+		case Counter: 
+			if m.Delta == nil {
+				err.Reason = EmptyValue
+				err.Message = "Empty value forbidden"
+				return ok, err
+			}
+			ok = true
+		default:
+			err.Reason = WrongType
+			err.Message = "Unsupported metric type"
+			return ok, err
+	}
+
+	return ok, nil
 }
 
 func (m *Metrics) Update(value string) error {
-	var err error
+	err := &MetricError{}
 	switch m.MType {
 		case Gauge:
 			if newValue, parseErr := strconv.ParseFloat(value, 64); parseErr == nil {
@@ -44,7 +106,9 @@ func (m *Metrics) Update(value string) error {
 					*m.Value = newValue
 				}
 			} else {
-				err = parseErr
+				err.Reason = InvalidFloat
+				err.Message = "Failed parse float from value"
+				return err
 			}
 		case Counter:
 			if newValue, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil {
@@ -54,32 +118,72 @@ func (m *Metrics) Update(value string) error {
 					*m.Delta += newValue
 				}
 			} else {
-				err = parseErr
+				err.Reason = InvalidInt
+				err.Message = "Failed parse int from value"
+				return err
 			}
 		default:
-			err = fmt.Errorf("unknown type")
+			err.Reason = WrongType
+			err.Message = "Unsupported type"
+			return err
 	}
 
-	return err
+	return nil
 }
 
-func (m *Metrics) StringValue() (result string) {
+func (m Metrics) StringValue() (result string) {
 	switch m.MType {
-	case Gauge:
-		if m.Value == nil { return result }
-		result = strconv.FormatFloat(*m.Value, 'g', -1, 64)
-	case Counter:
-		if m.Delta == nil { return result }
-		result = strconv.FormatInt(*m.Delta, 10)
+		case Gauge: if m.Value != nil { result = strconv.FormatFloat(*m.Value, 'g', -1, 64) }
+		case Counter: if m.Delta != nil { result = strconv.FormatInt(*m.Delta, 10) }
 	}
 
 	return result
 }
 
-func (m *Metrics) String() string {
+func (m Metrics) String() string {
 	return fmt.Sprintf("%s %s: %s", m.MType, m.ID, m.StringValue())
 }
 
-func (m *Metrics) Key() string {
+func (m Metrics) Key() string {
 	return m.MType + m.ID
+}
+
+func (m *Metrics) UnmarshalJSON(data []byte) error {
+	type Alias Metrics
+
+	al := struct { *Alias }{
+		Alias: (*Alias)(m),
+	}
+
+	if err := json.Unmarshal(data, &al); err != nil { return err }
+
+	ok, cause := m.Valid()
+
+	if !ok { return cause }
+
+	return nil
+}
+
+func (m Metrics) ToPgxNamedArgs() pgx.NamedArgs {
+	return pgx.NamedArgs{"id": m.ID, "mtype": m.MType, "value": m.Value, "delta": m.Delta, "hash": m.Hash}
+}
+
+func (m Metrics) InsertSQL() string {
+	return "INSERT INTO metrics (id, mtype, value, delta, hash) VALUES (@id, @mtype, @value, @delta, @hash) ON CONFLICT ON CONSTRAINT metrics_pkey DO UPDATE SET value = EXCLUDED.value, delta = metrics.delta + EXCLUDED.delta, hash = EXCLUDED.hash"
+}
+
+func (m Metrics) UpdateSQL() string {
+	return "UPDATE metrics SET value = @value, delta = @delta WHERE CONCAT(mtype, id) = $1"
+}
+
+func (m Metrics) SelectSQL() string {
+	return "SELECT * FROM metrics"
+}
+
+func (m Metrics) GetSQL() string {
+	return "SELECT * FROM metrics WHERE CONCAT(mtype, id) = $1 LIMIT 1"
+}
+
+func (m Metrics) DeleteSQL() string {
+	return "DELETE FROM metrics WHERE CONCAT(mtype, id) = $1"
 }

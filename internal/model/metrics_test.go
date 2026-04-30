@@ -14,20 +14,23 @@ func TestNewMetric(t *testing.T) {
 		name string
 		metricID string
 		metricType string
+		metricValue string
 		want want
 	}{
 		{
 			name: "Test new metric with valid type",
 			metricID: "Test",
 			metricType: Gauge,
+			metricValue: "2.3",
 			want: want {
-				returnValue: &Metrics{},
+				returnValue: &Metrics{ID: "Test", MType: Gauge, Value: new(float64(2.3)) },
 			},
 		},
 		{
 			name: "Test new metric with invalid type",
 			metricID: "Test2",
 			metricType: "myType",
+			metricValue: "0",
 			want: want {
 				returnValue: nil,
 			},
@@ -36,8 +39,9 @@ func TestNewMetric(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			value, err := NewMetric(tc.metricType, tc.metricID)
+			value, err := NewMetric(tc.metricType, tc.metricID, tc.metricValue)
 			if err == nil {
+				t.Log(err)
 				assert.IsType(t, tc.want.returnValue, value)
 				assert.NoError(t, err)
 			} else {

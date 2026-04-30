@@ -1,41 +1,51 @@
-package storage
+package repository
 
 import(
 	"iter"
-	"os"
 	"bufio"
 	"encoding/json"
+	"io"
+	"os"
+	"sync"
 	"time"
 	"context"
-	"io"
-	"sync"
+	"fmt"
 	"github.com/rs/zerolog/log"
+	"maps"
 )
 
-type hasKey interface {
-	Key() string
-}
 
 type memStorage[T hasKey] struct {
 	storageFile *os.File
 	mu sync.Mutex
 	ds map[string]T
+	err error
 }
 
-func (s *memStorage[T]) Set(k string, v T) {
+func (s *memStorage[T]) Set(ctx context.Context, v T) {
 	s.mu.Lock()
-	s.ds[k] = v
+	s.ds[v.Key()] = v
 	s.mu.Unlock()
 }
 
-func (s *memStorage[T]) Get(k string) (T, bool) {
+func (s *memStorage[T]) BulkSet(ctx context.Context, vs []T) {
+	s.mu.Lock()
+
+	iterVs := func(yield func(string, T) bool) {
+		for _, v := range vs { if !yield(v.Key(), v) { return } }
+	}
+	maps.Insert(s.ds, iterVs)
+	s.mu.Unlock()
+}
+
+func (s *memStorage[T]) Get(ctx context.Context, k string) (T, bool) {
 	s.mu.Lock()
 	value, ok := s.ds[k]
 	s.mu.Unlock()
 	return value, ok
 }
 
-func (s *memStorage[T]) Remove(k string) {
+func (s *memStorage[T]) Remove(ctx context.Context, k string) {
 	delete(s.ds, k)
 }
 
@@ -52,7 +62,7 @@ func NewStorage[T hasKey](storageFile *os.File, restore bool) (storage *memStora
 	return storage, nil
 }
 
-func (s *memStorage[T]) All() iter.Seq[T] {
+func (s *memStorage[T]) All(ctx context.Context) iter.Seq[T] {
 	return func(yield func(T) bool) {
 		for _, v := range s.ds {
 			if !yield(v) { return }
@@ -82,7 +92,7 @@ func (ms *memStorage[T]) WriteToFile(ctx context.Context, errCh chan error, dela
 					return
 				}
 
-				for item := range ms.All() {
+				for item := range ms.All(ctx) {
 					data, err := json.Marshal(item)
 					if err != nil {
 						log.Debug().Err(err).Str("itemKey", item.Key()).Msg("marshal item err")
@@ -121,9 +131,17 @@ func (ms *memStorage[T]) restore() (err error) {
 			log.Debug().Err(err).Str("item data", scanner.Text()).Msg("unmarshal item err")
 			return err
 		}
-		ms.Set(item.Key(), item)
+		ms.Set(context.Background(), item)
 	}
 
 	if err = scanner.Err(); err != nil { return err }
 	return nil
+}
+
+func (ms *memStorage[T]) Ping(ctx context.Context) error {
+	return fmt.Errorf("No DB repo")
+}
+
+func (ms *memStorage[T]) Err() error {
+	return ms.err
 }

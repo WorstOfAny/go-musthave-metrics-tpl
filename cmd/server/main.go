@@ -2,19 +2,15 @@ package main
 
 import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/storage"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/go-chi/chi/v5"
 	"net/http"
-	"time"
 	"context"
-	"os"
 	"os/signal"
 	"syscall"
 	"fmt"
 	"github.com/rs/zerolog/log"
-	"database/sql"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -28,24 +24,15 @@ func run() (err error) {
 	err = parseFlags()
 	if err != nil { return err }
 
-	db, err := sql.Open("pgx", cfg.DatabaseDSN)
-	if err != nil { return err }
-	defer db.Close()
-
-	file, err := os.OpenFile(cfg.FileStoragePath, os.O_RDWR|os.O_CREATE, 0666)
-	if err != nil { return err }
-	defer file.Close()
-
 	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancelFunc()
 
-	st, err := storage.NewStorage[*models.Metrics](file, cfg.RestoreStorage)
+	errCh := make(chan error, 2)
+
+	repo := repository.NewRepository[models.Metrics](ctx, errCh, cfg.RepoConfig)
 	if err != nil { return err }
 
-	errCh := make(chan error, 2)
-	go st.WriteToFile(ctx, errCh, time.Duration(cfg.StoreInterval) * time.Second)
-
-	c := handler.NewMetricsController(st, db)
+	c := handler.NewMetricsController(repo)
 	r := chi.NewRouter()
 	c.ApplyTo(r)
 

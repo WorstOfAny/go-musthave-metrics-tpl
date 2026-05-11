@@ -12,10 +12,7 @@ type config struct {
 	RepoConfig repository.Config
 }
 
-var cfg config
-
-func parseFlags() (err error) {
-	cfg = config{}
+func parseFlags(cfg *config) (err error) {
 	flag.StringVar(&cfg.RunAddr, "a", "localhost:8080", "address and port to run server")
 	flag.IntVar(&cfg.RepoConfig.StoreInterval, "i", 300, "Write storage to restore file interval in seconds")
 	flag.StringVar(&cfg.RepoConfig.FileStoragePath, "f", "store.json", "Storage restore file")
@@ -23,7 +20,7 @@ func parseFlags() (err error) {
 	flag.StringVar(&cfg.RepoConfig.DatabaseDSN, "d", "", "Database data source name")
 	flag.Parse()
 
-	err = env.Parse(&cfg)
+	err = env.Parse(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to read configuration from environment variables: %w", err)
 	}

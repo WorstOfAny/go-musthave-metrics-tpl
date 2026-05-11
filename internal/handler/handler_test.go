@@ -10,9 +10,7 @@ import(
 	"github.com/go-chi/chi/v5"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
-	//"go.uber.org/mock/gomock"
 	"math"
-	//"os"
 	"context"
 )
 
@@ -378,7 +376,9 @@ func runCases(t *testing.T, cases []requestCase, metrics []models.Metrics) {
 		testConfig := repository.Config{StoreInterval: 10, FileStoragePath: "test_store.json", RestoreStorage: false, DatabaseDSN: ""}
 		errCh := make(chan error, 2)
 		ctx := context.Background()
-		repo := repository.NewRepository[models.Metrics](ctx, errCh, testConfig)
+		repo, err := repository.NewRepository(ctx, errCh, testConfig)
+
+		if err != nil { t.Fatal(err) }
 
 		c := NewMetricsController(repo)
 		for _, v := range metrics { c.storage.Set(ctx, v) }

@@ -9,139 +9,155 @@ import(
 	"sync"
 	"time"
 	"context"
-	"fmt"
 	"github.com/rs/zerolog/log"
 	"maps"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+	"fmt"
 )
 
-
-type memStorage[T hasKey] struct {
+type memStorage struct {
 	storageFile *os.File
 	mu sync.Mutex
-	ds map[string]T
-	err error
+	ds map[string]models.Metrics
 }
 
-func (s *memStorage[T]) Set(ctx context.Context, v T) {
+func (s *memStorage) Set(ctx context.Context, v models.Metrics) error {
 	s.mu.Lock()
 	s.ds[v.Key()] = v
 	s.mu.Unlock()
+	return nil
 }
 
-func (s *memStorage[T]) BulkSet(ctx context.Context, vs []T) {
+func (s *memStorage) BulkSet(ctx context.Context, vs []models.Metrics) error {
 	s.mu.Lock()
 
-	iterVs := func(yield func(string, T) bool) {
+	iterVs := func(yield func(string, models.Metrics) bool) {
 		for _, v := range vs { if !yield(v.Key(), v) { return } }
 	}
 	maps.Insert(s.ds, iterVs)
 	s.mu.Unlock()
+	return nil
 }
 
-func (s *memStorage[T]) Get(ctx context.Context, k string) (T, bool) {
+func (s *memStorage) Get(ctx context.Context, k string) (models.Metrics, error) {
+	var err error
 	s.mu.Lock()
 	value, ok := s.ds[k]
 	s.mu.Unlock()
-	return value, ok
+	if !ok {
+		err = ErrNotFound
+	}
+	return value, err
 }
 
-func (s *memStorage[T]) Remove(ctx context.Context, k string) {
+func (s *memStorage) Remove(ctx context.Context, k string) error {
 	delete(s.ds, k)
+	return nil
 }
 
-func NewStorage[T hasKey](storageFile *os.File, restore bool) (storage *memStorage[T], err error) {
-	storage = &memStorage[T]{ds: map[string]T{}, storageFile: storageFile}
+func NewStorage(storageFile *os.File, restore bool) (storage *memStorage, err error) {
+	storage = &memStorage{ds: map[string]models.Metrics{}, storageFile: storageFile}
 	if restore {
 		err = storage.restore()
 		if err != nil {
-			log.Debug().Str("storage restore error", err.Error()).Msg("")
-			return nil, err
+			log.Debug().Err(err).Msg("storage restore error")
+			return nil, fmt.Errorf("failed to restore storage from storage file: %w", err)
 		}
 	}
 
 	return storage, nil
 }
 
-func (s *memStorage[T]) All(ctx context.Context) iter.Seq[T] {
-	return func(yield func(T) bool) {
+func (s *memStorage) All(ctx context.Context) (iter.Seq[models.Metrics], error) {
+	return func(yield func(models.Metrics) bool) {
 		for _, v := range s.ds {
 			if !yield(v) { return }
 		}
-	}
+	}, nil
 }
 
-func (ms *memStorage[T]) WriteToFile(ctx context.Context, errCh chan error, delay time.Duration) {
-	writer := bufio.NewWriter(ms.storageFile)
+func (s *memStorage) WriteToFile(ctx context.Context, errCh chan error, delay time.Duration) {
+	writer := bufio.NewWriter(s.storageFile)
 
 	for {
 		select {
 			case <-ctx.Done(): return
 			case <-time.After(delay):
-				ms.mu.Lock()
-				err := ms.storageFile.Truncate(0)
+				s.mu.Lock()
+				err := s.storageFile.Truncate(0)
 				if err != nil {
 					log.Debug().Err(err).Msg("file truncate err")
-					errCh <- err
+					errCh <- fmt.Errorf("failed to truncate storage file: %w", err)
 					return
 				}
 
-				_, err = ms.storageFile.Seek(0, io.SeekStart)
+				_, err = s.storageFile.Seek(0, io.SeekStart)
 				if err != nil {
 					log.Debug().Err(err).Msg("file seek err")
-					errCh <- err
+					errCh <- fmt.Errorf("failed to seek storage file: %w", err)
 					return
 				}
 
-				for item := range ms.All(ctx) {
+				items, err := s.All(ctx)
+
+				if err != nil {
+					log.Debug().Err(err).Msg("failed fetch metrics")
+					errCh <- fmt.Errorf("failed to marshal metric: %w", err)
+					return
+				}
+
+				for item := range items {
 					data, err := json.Marshal(item)
 					if err != nil {
 						log.Debug().Err(err).Str("itemKey", item.Key()).Msg("marshal item err")
-						errCh <- err
+						errCh <- fmt.Errorf("failed to marshal metric: %w", err)
 						return
 					}
 
 					_, err = writer.Write(data)
 					if err != nil {
 						log.Debug().Err(err).Str("data", string(data)).Msg("write item err")
-						errCh <- err
+						errCh <- fmt.Errorf("failed to write data to buffer: %w", err)
 						return
 					}
 
 					err = writer.WriteByte('\n')
 					if err != nil {
 						log.Debug().Err(err).Msg("write byte err")
-						errCh <- err
+						errCh <- fmt.Errorf("failed to write data to buffer: %w", err)
 						return
 					}
 
 					writer.Flush()
 				}
-				ms.mu.Unlock()
+				s.mu.Unlock()
 		}
 	}
 }
 
-func (ms *memStorage[T]) restore() (err error) {
-	scanner := bufio.NewScanner(ms.storageFile)
+func (s *memStorage) restore() (err error) {
+	scanner := bufio.NewScanner(s.storageFile)
 
 	for scanner.Scan() {
-		var item T
+		var item models.Metrics
 		err = json.Unmarshal([]byte(scanner.Text()), &item)
 		if err != nil {
 			log.Debug().Err(err).Str("item data", scanner.Text()).Msg("unmarshal item err")
-			return err
+			return fmt.Errorf("failed to unmarshal object from storage file: %w", err)
 		}
-		ms.Set(context.Background(), item)
+		err := s.Set(context.Background(), item)
+
+		if err != nil {
+			return fmt.Errorf("failed to set object to repository: %w", err)
+		}
 	}
 
-	if err = scanner.Err(); err != nil { return err }
+	if err = scanner.Err(); err != nil {
+		return fmt.Errorf("failed to scan storage file: %w", err)
+	}
 	return nil
 }
 
-func (ms *memStorage[T]) Ping(ctx context.Context) error {
-	return fmt.Errorf("No DB repo")
-}
-
-func (ms *memStorage[T]) Err() error {
-	return ms.err
+func (s *memStorage) Ping(ctx context.Context) error {
+	return nil
 }

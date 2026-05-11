@@ -5,8 +5,14 @@ import(
 	"time"
 	"os"
 	"iter"
-	pgx "github.com/jackc/pgx/v5"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	pgxpool "github.com/jackc/pgx/v5/pgxpool"
+	"fmt"
+	"errors"
 )
 
 type Config struct {
@@ -16,64 +22,70 @@ type Config struct {
 	DatabaseDSN string `env:"DATABASE_DSN"`
 }
 
-type Repository[T allowedObject] interface {
-	Set(context.Context, T)
-	BulkSet(context.Context, []T)
-	Get(context.Context, string) (T, bool)
-	Remove(context.Context, string)
-	All(context.Context) iter.Seq[T]
+type Repository interface {
+	Set(context.Context, models.Metrics) error
+	BulkSet(context.Context, []models.Metrics) error
+	Get(context.Context, string) (models.Metrics, error)
+	Remove(context.Context, string) error
+	All(context.Context) (iter.Seq[models.Metrics], error)
 	Ping(context.Context) error
-	Err() error
 }
 
-type hasKey interface {
-	Key() string
+type repositoryError string
+
+func(re repositoryError) Error() string {
+	return string(re)
 }
 
-type hasSQL interface {
-	InsertSQL() string
-	SelectSQL() string
-	GetSQL() string
-	DeleteSQL() string
-	ToPgxNamedArgs() pgx.NamedArgs
-}
+const ErrNotFound = repositoryError("metric not found")
 
-type allowedObject interface {
-	hasKey
-	hasSQL
-}
-
-func NewRepository[T allowedObject](ctx context.Context, errCh chan error, cfg Config) (Repository[T]) {
+func NewRepository(ctx context.Context, errCh chan error, cfg Config) (Repository, error) {
 
 	switch {
 		case cfg.DatabaseDSN != "":
+			m, err := migrate.New( "file://./migrations/", cfg.DatabaseDSN, )
+			if err != nil {
+				return nil, fmt.Errorf("failed initialize migrations: %w", err)
+			}
+			err = m.Up()
+
+			if err != nil && !errors.Is(err, migrate.ErrNoChange) {
+				return nil, fmt.Errorf("failed to run migrations: %w", err)
+			}
+
 			db, err := pgxpool.New(ctx, cfg.DatabaseDSN)
-			if err != nil { errCh <- err }
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize db connections pool: %w", err)
+			}
 
 			go func() {
-				select {
-					case <-ctx.Done(): db.Close()
-				}
+				<-ctx.Done()
+				db.Close()
 			}()
 
-			return NewDBDecorator[T](db)
+			return NewDBDecorator(db), nil
 		case cfg.FileStoragePath != "":
 			file, err := os.OpenFile(cfg.FileStoragePath, os.O_RDWR|os.O_CREATE, 0666)
-			if err != nil { errCh <- err }
+			if err != nil {
+				return nil, fmt.Errorf("failed to open file: %w", err)
+			}
 			go func() {
-				select {
-					case <-ctx.Done(): file.Close()
-				}
+				<-ctx.Done()
+				file.Close()
 			}()
 
-			repo, err := NewStorage[T](file, cfg.RestoreStorage)
-			if err != nil { errCh <- err }
+			repo, err := NewStorage(file, cfg.RestoreStorage)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize mem storage: %w", err)
+			}
 			go repo.WriteToFile(ctx, errCh, time.Duration(cfg.StoreInterval) * time.Second)
-			return repo
+			return repo, nil
 		default:
-			repo, err := NewStorage[T](nil, false)
-			if err != nil { errCh <- err }
-			return repo
+			repo, err := NewStorage(nil, false)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize mem storage: %w", err)
+			}
+			return repo, nil
 	}
 
 }

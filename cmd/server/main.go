@@ -3,7 +3,6 @@ package main
 import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"context"
@@ -14,23 +13,23 @@ import(
 )
 
 func main() {
-	if err := run(); err != nil {
+	cfg := &config{}
+	err := parseFlags(cfg)
+	if err != nil { panic(fmt.Errorf("failed to parse flags: %w", err)) }
+	if err := run(cfg); err != nil {
 		log.Debug().Err(err).Msg("server run error")
 		panic(err)
 	}
 }
 
-func run() (err error) {
-	err = parseFlags()
-	if err != nil { return err }
-
+func run(cfg *config) (err error) {
 	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancelFunc()
 
 	errCh := make(chan error, 2)
 
-	repo := repository.NewRepository[models.Metrics](ctx, errCh, cfg.RepoConfig)
-	if err != nil { return err }
+	repo, err := repository.NewRepository(ctx, errCh, cfg.RepoConfig)
+	if err != nil { return fmt.Errorf("failed to initialize repository: %w", err) }
 
 	c := handler.NewMetricsController(repo)
 	r := chi.NewRouter()
@@ -41,7 +40,7 @@ func run() (err error) {
 	for {
 		select {
 			case <-ctx.Done(): return nil
-			case err = <-errCh: return err
+			case err = <-errCh: return fmt.Errorf("server error: %w", err)
 		}
 	}
 }

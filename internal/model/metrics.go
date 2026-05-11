@@ -4,7 +4,6 @@ import(
 	"strconv"
 	"fmt"
 	"encoding/json"
-	pgx "github.com/jackc/pgx/v5"
 )
 
 type FailReason string
@@ -162,28 +161,4 @@ func (m *Metrics) UnmarshalJSON(data []byte) error {
 	if !ok { return cause }
 
 	return nil
-}
-
-func (m Metrics) ToPgxNamedArgs() pgx.NamedArgs {
-	return pgx.NamedArgs{"id": m.ID, "mtype": m.MType, "value": m.Value, "delta": m.Delta, "hash": m.Hash}
-}
-
-func (m Metrics) InsertSQL() string {
-	return "INSERT INTO metrics (id, mtype, value, delta, hash) VALUES (@id, @mtype, @value, @delta, @hash) ON CONFLICT ON CONSTRAINT metrics_pkey DO UPDATE SET value = EXCLUDED.value, delta = metrics.delta + EXCLUDED.delta, hash = EXCLUDED.hash"
-}
-
-func (m Metrics) UpdateSQL() string {
-	return "UPDATE metrics SET value = @value, delta = @delta WHERE CONCAT(mtype, id) = $1"
-}
-
-func (m Metrics) SelectSQL() string {
-	return "SELECT * FROM metrics"
-}
-
-func (m Metrics) GetSQL() string {
-	return "SELECT * FROM metrics WHERE CONCAT(mtype, id) = $1 LIMIT 1"
-}
-
-func (m Metrics) DeleteSQL() string {
-	return "DELETE FROM metrics WHERE CONCAT(mtype, id) = $1"
 }

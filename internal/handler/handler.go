@@ -5,6 +5,7 @@ import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
+	pgconn "github.com/jackc/pgconn"
 	"net/http"
 	"strings"
 	"context"
@@ -16,13 +17,15 @@ import(
 	"io"
 	"runtime/debug"
 	"errors"
+	"maps"
+	"slices"
 )
 
 type metricsController struct {
-	storage repository.Repository[models.Metrics]
+	storage repository.Repository
 }
 
-func NewMetricsController(storage repository.Repository[models.Metrics]) *metricsController {
+func NewMetricsController(storage repository.Repository) *metricsController {
 	return &metricsController{storage: storage}
 }
 
@@ -70,14 +73,14 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 	mux.Route("/value", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.showJSON)
 		r.Route("/{metricType}/{metricName}", func(r chi.Router){
-			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainCtx).Get("/", c.showTextPlain)
+			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainGetCtx).Get("/", c.showTextPlain)
 		})
 	})
 
 	mux.Route("/update", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.update)
 		r.Route("/{metricType}/{metricName}/{metricValue}", func(r chi.Router) {
-			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainCtx).Post("/", c.update)
+			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainPostCtx).Post("/", c.update)
 		})
 	})
 	mux.With(jsonTypeSet, jsonTypeCheck, c.bulkJsonCtx, encodeResponse).Post("/updates/", c.updates)
@@ -177,7 +180,7 @@ func encodeResponse(next http.Handler) http.Handler {
 
 func (c *metricsController) jsonCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reqMetric *models.Metrics
+		var reqMetric models.Metrics
 		if !decodeMetrics(w, r, &reqMetric) { return }
 
 		ctx := context.WithValue(r.Context(), metricKey, reqMetric)
@@ -217,54 +220,52 @@ func decodeMetrics(w http.ResponseWriter, r *http.Request, ptr any) bool {
 	return true
 }
 
-func (c *metricsController) plainCtx(next http.Handler) http.Handler {
+func (c *metricsController) plainPostCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metricType := chi.URLParam(r, "metricType")
 		metricName := chi.URLParam(r, "metricName")
 		metricValue := chi.URLParam(r, "metricValue")
-		var m *models.Metrics
-		switch r.Method {
-			case http.MethodGet:
-				metric, ok := c.storage.Get(r.Context(), metricType + metricName)
-
-				if err := c.storage.Err(); err != nil {
-					metricErrorHandler(w, r, err, "error while fetching metric")
-					return
-				}
-
-				if !ok {
-					w.WriteHeader(http.StatusNotFound)
-					return
-				}
-
-				m = &metric
-			case http.MethodPost:
-				metric, err := models.NewMetric(metricType, metricName, metricValue)
-				if err != nil {
-					metricErrorHandler(w, r, err, "can't create metric from parameters")
-					return
-				}
-
-				if ok, err := metric.Valid(); !ok {
-					metricErrorHandler(w, r, err, "invalid metric parameters")
-					return
-				}
-
-				m = metric
-			default:
-				w.WriteHeader(http.StatusMethodNotAllowed)
-				return
+		metric, err := models.NewMetric(metricType, metricName, metricValue)
+		if err != nil {
+			metricErrorHandler(w, r, err, "can't create metric from parameters")
+			return
 		}
 
-		ctx := context.WithValue(r.Context(), metricKey, m)
+		if ok, err := metric.Valid(); !ok {
+			metricErrorHandler(w, r, err, "invalid metric parameters")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), metricKey, *metric)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (c *metricsController) plainGetCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		metricType := chi.URLParam(r, "metricType")
+		metricName := chi.URLParam(r, "metricName")
+		metric, err := c.storage.Get(r.Context(), metricType + metricName)
+
+		if err != nil {
+			metricErrorHandler(w, r, err, "error while fetching metric")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), metricKey, metric)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func metricErrorHandler(w http.ResponseWriter, r *http.Request, err error, logMsg string) {
 	log.Debug().Err(err).Msg(logMsg)
-	var metrErr *models.MetricError
 
+	if errors.Is(err, repository.ErrNotFound) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	var metrErr *models.MetricError
 	if errors.As(err, &metrErr) {
 		fmt.Println(metrErr.Cause())
 		switch metrErr.Cause() {
@@ -315,7 +316,13 @@ func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	var body string
 	body += "<html><body>"
-	for v := range c.storage.All(r.Context()) {
+	objs, err := c.storage.All(r.Context())
+	if err != nil {
+		log.Debug().Err(err).Msg("failed to fetch metrics from db")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	for v := range objs {
 		body += fmt.Sprintf("<p>%s</p>", v.String())
 	}
 	body += "</body></html>"
@@ -323,12 +330,21 @@ func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *metricsController) showJSON(w http.ResponseWriter, r *http.Request) {
-	m, ok := r.Context().Value(metricKey).(*models.Metrics)
-
-	metric, ok := c.storage.Get(r.Context(), m.Key())
+	m, ok := r.Context().Value(metricKey).(models.Metrics)
 
 	if !ok {
-		w.WriteHeader(http.StatusNotFound)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	metric, err := c.storage.Get(r.Context(), m.Key())
+
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -343,7 +359,7 @@ func (c *metricsController) showJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *metricsController) showTextPlain(w http.ResponseWriter, r *http.Request) {
-	m, ok := r.Context().Value(metricKey).(*models.Metrics)
+	m, ok := r.Context().Value(metricKey).(models.Metrics)
 
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
@@ -354,7 +370,7 @@ func (c *metricsController) showTextPlain(w http.ResponseWriter, r *http.Request
 }
 
 func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
-	metric, ok := r.Context().Value(metricKey).(*models.Metrics)
+	metric, ok := r.Context().Value(metricKey).(models.Metrics)
 
 	if !ok {
 		log.Debug().Msg("Failed to fetch metric from request")
@@ -362,19 +378,25 @@ func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if m, exist := c.storage.Get(r.Context(), metric.Key()); exist {
+	if m, err := c.storage.Get(r.Context(), metric.Key()); err != nil {
+		if !errors.Is(err, repository.ErrNotFound) {
+			log.Debug().Err(err).Msg("Failed to fetch metric")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+	} else {
 		err := m.Update(metric.StringValue())
 		if err != nil {
 			log.Debug().Err(err).Msg("Failed to update metric")
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		metric = &m
+		metric = m
 	}
 
-	c.storage.Set(r.Context(), *metric)
-	if err := c.storage.Err(); err != nil {
-		log.Debug().Err(err).Str("metricID", metric.ID).Str("metricType", metric.MType).Msg("storage err")
+	err := c.storage.Set(r.Context(), metric)
+	if err != nil {
+		log.Debug().Err(err).Str("metricID", metric.ID).Str("metricType", metric.MType).Msg("storage set err")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -398,25 +420,43 @@ func (c *metricsController) updates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.storage.Ping(r.Context()); err != nil {
-		for index, metric := range metrics {
-			if m, exist := c.storage.Get(r.Context(), metric.Key()); exist {
-				err := m.Update(metric.StringValue())
+	tmpstore := map[string]models.Metrics{}
+	for _, metric := range metrics {
+		if m, err := c.storage.Get(r.Context(), metric.Key()); err != nil {
+			if !errors.Is(err, repository.ErrNotFound) {
+				log.Debug().Err(err).Msg("Failed to fetch metric")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			tmpmetric, ok := tmpstore[metric.Key()]
+			if ok {
+				err := tmpmetric.Update(metric.StringValue())
 				if err != nil {
-					log.Debug().Err(err).Str("metricID", m.ID).Str("metricType", m.MType).Msg("update error")
+					log.Debug().Err(err).Msg("Failed to update metric")
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
+				tmpstore[metric.Key()] = tmpmetric
+			} else {
 
-				metrics[index] = m
+				tmpstore[metric.Key()] = metric
 			}
+		} else {
+			err := m.Update(metric.StringValue())
+			if err != nil {
+				log.Debug().Err(err).Msg("Failed to update metric")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			tmpstore[m.Key()] = m
 		}
 	}
 
-	c.storage.BulkSet(r.Context(), metrics)
+	err := c.storage.BulkSet(r.Context(), slices.Collect(maps.Values(tmpstore)))
 
-	if err := c.storage.Err(); err != nil {
-		log.Debug().Err(err).Msg("storage err")
+	if err != nil {
+		log.Debug().Err(err).Msg("storage bulkset err")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -434,10 +474,19 @@ func (c *metricsController) updates(w http.ResponseWriter, r *http.Request) {
 
 func (c *metricsController) ping(w http.ResponseWriter, r *http.Request) {
 	if err := c.storage.Ping(r.Context()); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
 			log.Debug().
+				Str("pg message", pgErr.Message).
 				Err(err).
 				Msg("failed to ping database")
 			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			log.Debug().
+				Err(err).
+				Msg("failed to ping database")
+				w.WriteHeader(http.StatusInternalServerError)
+		}
 			return
 	}
 

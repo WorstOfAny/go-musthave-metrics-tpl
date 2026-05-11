@@ -11,16 +11,16 @@ import(
 )
 
 func main() {
-	if err := run(); err != nil {
+	cfg := &config{}
+	err := parseFlags(cfg)
+	if err != nil { panic(fmt.Errorf("failed to parse flags: %w", err)) }
+	if err := run(cfg); err != nil {
 		log.Debug().Err(err).Msg("server error")
 		panic(err)
 	}
 }
 
-func run() (err error) {
-	err = parseFlags()
-	if err != nil { return err }
-
+func run(cfg *config) (err error) {
 	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancelFunc()
 
@@ -35,7 +35,7 @@ func run() (err error) {
 	for {
 		select {
 			case <-ctx.Done(): return nil
-			case err = <-errCh: return err
+			case err = <-errCh: return fmt.Errorf("worker error: %w", err)
 		}
 	}
 }

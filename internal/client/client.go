@@ -1,12 +1,17 @@
 package client
 
 import(
+	"errors"
+	"strconv"
 	"time"
 	"io"
 	"github.com/go-resty/resty/v2"
 	"compress/gzip"
 	"bytes"
 	"github.com/rs/zerolog/log"
+	"syscall"
+	"net"
+	"net/http"
 )
 
 type Client struct {
@@ -15,8 +20,26 @@ type Client struct {
 
 func NewClient() *Client {
 	restyC := resty.New()
-	restyC.SetTimeout(time.Second * 10)
-
+	restyC.
+		SetTimeout(time.Second * 15).
+		SetRetryCount(3).
+		SetRetryMaxWaitTime(15 * time.Second).
+		SetRetryAfter(func(c *resty.Client, r *resty.Response) (time.Duration, error) {
+			delay := time.Duration(2 * (r.Request.Attempt) - 1) * time.Second
+			return delay, nil
+		}).
+		AddRetryCondition(func(r *resty.Response, err error) bool {
+			if err != nil {
+				var netErr net.Error
+				log.Debug().Err(err).Msg("request err")
+				if errors.As(err, &netErr) && netErr.Timeout() { return true }
+				return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.EOF)
+			}
+			return r.StatusCode() == http.StatusTooManyRequests || r.StatusCode() > 499
+		}).
+		AddRetryHook(func(r *resty.Response, err error) {
+			if err != nil { log.Debug().Str("attempt", strconv.Itoa(r.Request.Attempt)).Err(err).Msg("Request attempt") }
+		})
 	return &Client{ client: restyC }
 }
 
@@ -38,7 +61,7 @@ func (c *Client) Post(u string, body []byte) error {
 		Post(u)
 
 	if err != nil {
-		log.Debug().Err(err).Msg("response err")
+		log.Debug().Err(err).Msg("request err")
 		return err
 	}
 	defer resp.RawResponse.Body.Close()

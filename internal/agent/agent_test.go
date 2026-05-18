@@ -79,7 +79,7 @@ func TestRun(t *testing.T) {
 			select {
 				case err := <- errCh:
 					if tc.err != nil {
-						assert.Equal(t, tc.err, err)
+						assert.Error(t, err)
 					} else {
 						t.Error("ошибка не ожидалась")
 					}

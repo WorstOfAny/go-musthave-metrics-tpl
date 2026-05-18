@@ -9,6 +9,7 @@ import(
 	"encoding/json"
 	"sync"
 	"github.com/rs/zerolog/log"
+	"fmt"
 )
 
 type agent struct {
@@ -47,7 +48,7 @@ func (w *worker) Run(ctx context.Context, errCh chan error, delay time.Duration)
 				err = w.action()
 				if err != nil {
 					log.Debug().Err(err).Msg("worker action err")
-					errCh <- err
+					errCh <- fmt.Errorf("failed to execute worker action: %w", err)
 					return
 				}
 				w.mu.Unlock()
@@ -55,14 +56,18 @@ func (w *worker) Run(ctx context.Context, errCh chan error, delay time.Duration)
 	}
 }
 
-func (a *agent) reportMetrics() (err error) {
+func (a *agent) reportMetrics() (error) {
 	a.mu.Lock()
-	for metric := range a.stats.AllMetrics() {
-		var body []byte
-		body, err = json.Marshal(metric)
-		err = a.client.Post(a.reportURL.String() + "/update", body)
+
+	body, err := json.Marshal(a.stats)
+	if err != nil { return fmt.Errorf("failed to marshal data: %w", err) }
+
+	err = a.client.Post(a.reportURL.String() + "/updates", body)
+	if err != nil {
+		return fmt.Errorf("failed to send data to server: %w", err)
 	}
+
 	*a.stats.PollCount = 0
 	a.mu.Unlock()
-	return err
+	return nil
 }

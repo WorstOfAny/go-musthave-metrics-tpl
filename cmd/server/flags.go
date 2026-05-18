@@ -3,38 +3,27 @@ package main
 import(
 	"flag"
 	"github.com/caarlos0/env/v11"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 	"fmt"
 )
 
-var flagRunAddr string
-var flagStoreInterval int
-var flagFileStoragePath string
-var flagRestoreStorage bool
-
 type config struct {
-	RunAddr *string `env:"ADDRESS"`
-	StoreInterval *int `env:"STORE_INTERVAL"`
-	FileStoragePath *string `env:"FILE_STORAGE_PATH"`
-	RestoreStorage *bool `env:"RESTORE"`
+	RunAddr string `env:"ADDRESS"`
+	RepoConfig repository.Config
 }
 
-func parseFlags() (err error) {
-	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
-	flag.IntVar(&flagStoreInterval, "i", 300, "Write storage to restore file interval in seconds")
-	flag.StringVar(&flagFileStoragePath, "f", "store.json", "Storage restore file")
-	flag.BoolVar(&flagRestoreStorage, "r", false, "Load from storage restore file")
+func parseFlags(cfg *config) (err error) {
+	flag.StringVar(&cfg.RunAddr, "a", "localhost:8080", "address and port to run server")
+	flag.IntVar(&cfg.RepoConfig.StoreInterval, "i", 300, "Write storage to restore file interval in seconds")
+	flag.StringVar(&cfg.RepoConfig.FileStoragePath, "f", "store.json", "Storage restore file")
+	flag.BoolVar(&cfg.RepoConfig.RestoreStorage, "r", false, "Load from storage restore file")
+	flag.StringVar(&cfg.RepoConfig.DatabaseDSN, "d", "", "Database data source name")
 	flag.Parse()
 
-	var cfg config
-	err = env.Parse(&cfg)
+	err = env.Parse(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to read configuration from environment variables: %w", err)
 	}
-
-	if cfg.RunAddr != nil { flagRunAddr = *cfg.RunAddr }
-	if cfg.StoreInterval != nil { flagStoreInterval = *cfg.StoreInterval }
-	if cfg.FileStoragePath != nil { flagFileStoragePath = *cfg.FileStoragePath }
-	if cfg.RestoreStorage != nil { flagRestoreStorage = *cfg.RestoreStorage }
 
 	return nil
 }

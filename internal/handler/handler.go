@@ -2,32 +2,30 @@ package handler
 
 import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
+	pgconn "github.com/jackc/pgconn"
 	"net/http"
 	"strings"
 	"context"
 	"fmt"
-	"iter"
 	"time"
 	"encoding/json"
 	"net/http/httputil"
 	"compress/gzip"
 	"io"
+	"runtime/debug"
+	"errors"
+	"maps"
+	"slices"
 )
 
-type metricsStorage interface {
- Set(string, *models.Metrics)
- Get(string) (*models.Metrics, bool)
- Remove(string)
- All() iter.Seq[*models.Metrics]
-}
-
 type metricsController struct {
-	storage metricsStorage
+	storage repository.Repository
 }
 
-func NewMetricsController(storage metricsStorage) *metricsController {
+func NewMetricsController(storage repository.Repository) *metricsController {
 	return &metricsController{storage: storage}
 }
 
@@ -64,29 +62,45 @@ type ctxKey string
 
 const(
 	metricKey ctxKey = "metric"
-	metricTypeKey ctxKey = "metricType"
-	metricNameKey ctxKey = "metricName"
-	metricValueKey ctxKey = "metricValue"
+	metricsKey ctxKey = "metrics"
 )
 
 func (c *metricsController) ApplyTo(mux chi.Router) {
-	mux.Use(decodeRequest)
-	mux.Use(logRequest)
+	mux.Use(recoveryPanic, decodeRequest, logRequest)
 	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)
+	mux.With(textPlainTypeSet).Get("/ping", c.ping)
+
 	mux.Route("/value", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.showJSON)
 		r.Route("/{metricType}/{metricName}", func(r chi.Router){
-			r.Use(textPlainTypeSet, textPlainTypeCheck, metricTypeCtx, c.metricNameCtx)
-			r.Get("/", c.showTextPlain)
+			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainGetCtx).Get("/", c.showTextPlain)
 		})
 	})
 
 	mux.Route("/update", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.update)
 		r.Route("/{metricType}/{metricName}/{metricValue}", func(r chi.Router) {
-			r.Use(textPlainTypeSet, textPlainTypeCheck, metricTypeCtx, c.metricNameCtx, metricValueCtx)
-			r.Post("/", c.update)
+			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainPostCtx).Post("/", c.update)
 		})
+	})
+	mux.With(jsonTypeSet, jsonTypeCheck, c.bulkJsonCtx, encodeResponse).Post("/updates/", c.updates)
+	mux.With(jsonTypeSet, jsonTypeCheck, c.bulkJsonCtx, encodeResponse).Post("/updates", c.updates)
+}
+
+func recoveryPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if r := recover(); r != nil {
+				if err, ok := r.(error); ok {
+					log.Debug().Err(err).Str("stack", string(debug.Stack())).Msg("panic")
+				} else {
+					log.Debug().Any("recovered", r).Msg("panic")
+				}
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			}
+		}()
+
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -127,15 +141,14 @@ func decodeRequest(next http.Handler) http.Handler {
 		}
 
 		gz, err := gzip.NewReader(r.Body)
-		defer gz.Close()
 
 		if err != nil {
-			log.Debug().
-				Err(err).
-				Msg("gzip reader error")
+			log.Debug().Err(err).Msg("gzip reader error")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		defer gz.Close()
 
 		r.Body = gz
 		next.ServeHTTP(w, r)
@@ -150,15 +163,14 @@ func encodeResponse(next http.Handler) http.Handler {
 		}
 
 		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
-		defer gz.Close()
 
 		if err != nil {
-			log.Debug().
-				Err(err).
-				Msg("gzip writer error")
+			log.Debug().Err(err).Msg("gzip writer error")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		defer gz.Close()
 
 		w.Header().Set("Content-Encoding", "gzip")
 
@@ -169,83 +181,100 @@ func encodeResponse(next http.Handler) http.Handler {
 func (c *metricsController) jsonCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqMetric models.Metrics
-		dec := json.NewDecoder(r.Body)
+		if !decodeMetrics(w, r, &reqMetric) { return }
 
-		if err := dec.Decode(&reqMetric); err != nil {
-			log.Debug().
-				Err(err).
-				Msg("json decode error")
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+		ctx := context.WithValue(r.Context(), metricKey, reqMetric)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
 
-		switch reqMetric.MType {
-		case models.Counter, models.Gauge:
-			ctx := context.WithValue(r.Context(), metricTypeKey, reqMetric.MType)
-			ctx = context.WithValue(ctx, metricNameKey, reqMetric.ID)
-			ctx = context.WithValue(ctx, metricValueKey, reqMetric.StringValue())
-			metric, found := c.storage.Get(reqMetric.MType + reqMetric.ID)
+func (c *metricsController) bulkJsonCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqMetrics []models.Metrics
+		if !decodeMetrics(w, r, &reqMetrics) { return }
 
-			if found {
-				ctx = context.WithValue(ctx, metricKey, metric)
+		ctx := context.WithValue(r.Context(), metricsKey, reqMetrics)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func decodeMetrics(w http.ResponseWriter, r *http.Request, ptr any) bool {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(ptr); err != nil {
+		var metrErr *models.MetricError
+
+		if errors.As(err, &metrErr) {
+			if strings.HasPrefix(r.URL.Path, "/value") {
+				return true
+			} else {
+				log.Debug().Err(err).Msg("invalid metric parameters")
 			}
-			next.ServeHTTP(w, r.WithContext(ctx))
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-	})
-}
-
-func metricTypeCtx(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		metricType := chi.URLParam(r, string(metricTypeKey))
-
-		switch metricType {
-		case models.Gauge, models.Counter:
-			ctx := context.WithValue(r.Context(), metricTypeKey, metricType)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-	})
-}
-
-func (c *metricsController) metricNameCtx(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		metricName := chi.URLParam(r, string(metricNameKey))
-		
-		if metricName == "" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
-		var ctx context.Context
-		metric, ok := c.storage.Get(r.Context().Value(metricTypeKey).(string) + metricName)
-
-		if ok {
-			ctx = context.WithValue(r.Context(), metricKey, metric)
 		} else {
-			ctx = context.WithValue(r.Context(), metricNameKey, metricName)
+			log.Debug().Err(err).Msg("json decode error")
+		}
+		w.WriteHeader(http.StatusBadRequest)
+
+		return false
+	}
+
+	return true
+}
+
+func (c *metricsController) plainPostCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		metricType := chi.URLParam(r, "metricType")
+		metricName := chi.URLParam(r, "metricName")
+		metricValue := chi.URLParam(r, "metricValue")
+		metric, err := models.NewMetric(metricType, metricName, metricValue)
+		if err != nil {
+			metricErrorHandler(w, r, err, "can't create metric from parameters")
+			return
 		}
 
+		if ok, err := metric.Valid(); !ok {
+			metricErrorHandler(w, r, err, "invalid metric parameters")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), metricKey, *metric)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func metricValueCtx(next http.Handler) http.Handler {
+func (c *metricsController) plainGetCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		metricValue := chi.URLParam(r, string(metricValueKey))
+		metricType := chi.URLParam(r, "metricType")
+		metricName := chi.URLParam(r, "metricName")
+		metric, err := c.storage.Get(r.Context(), metricType + metricName)
 
-		if metricValue == "" {
-			w.WriteHeader(http.StatusBadRequest)
+		if err != nil {
+			metricErrorHandler(w, r, err, "error while fetching metric")
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), metricValueKey, metricValue)
+		ctx := context.WithValue(r.Context(), metricKey, metric)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func metricErrorHandler(w http.ResponseWriter, r *http.Request, err error, logMsg string) {
+	log.Debug().Err(err).Msg(logMsg)
+
+	if errors.Is(err, repository.ErrNotFound) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	var metrErr *models.MetricError
+	if errors.As(err, &metrErr) {
+		fmt.Println(metrErr.Cause())
+		switch metrErr.Cause() {
+			case models.EmptyID: w.WriteHeader(http.StatusNotFound)
+			case models.EmptyValue, models.WrongType, models.InvalidFloat, models.InvalidInt: w.WriteHeader(http.StatusBadRequest)
+		}
+	} else {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
 }
 
 func textPlainTypeSet(next http.Handler) http.Handler {
@@ -287,7 +316,13 @@ func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	var body string
 	body += "<html><body>"
-	for v := range c.storage.All() {
+	objs, err := c.storage.All(r.Context())
+	if err != nil {
+		log.Debug().Err(err).Msg("failed to fetch metrics from db")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	for v := range objs {
 		body += fmt.Sprintf("<p>%s</p>", v.String())
 	}
 	body += "</body></html>"
@@ -295,71 +330,165 @@ func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *metricsController) showJSON(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	metric, metricOk := ctx.Value(metricKey).(*models.Metrics)
+	m, ok := r.Context().Value(metricKey).(models.Metrics)
 
-	if metricOk {
-		body, err := json.Marshal(metric)
-
-		if err != nil {
-			log.Debug().
-				Err(err).
-				Str("metricID", metric.ID).
-				Str("metricType", metric.MType).
-				Msg("marshal error")
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Write(body)
-	} else {
-		w.WriteHeader(http.StatusNotFound)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	
+
+	metric, err := c.storage.Get(r.Context(), m.Key())
+
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		return
+	}
+
+	body, err := json.Marshal(metric)
+
+	if err != nil {
+		log.Debug().Err(err).Str("metricID", metric.ID).Str("metricType", metric.MType).Msg("marshal error")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Write(body)
 }
 
 func (c *metricsController) showTextPlain(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	metric, metricOk := ctx.Value(metricKey).(*models.Metrics)
+	m, ok := r.Context().Value(metricKey).(models.Metrics)
 
-	if metricOk {
-		w.Write([]byte(metric.StringValue()))
-	} else {
+	if !ok {
 		w.WriteHeader(http.StatusNotFound)
+		return
 	}
+
+	w.Write([]byte(m.StringValue()))
 }
 
 func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
-	var err error
-	ctx := r.Context()
-	metric, metricOk := ctx.Value(metricKey).(*models.Metrics)
-	newMetric := !metricOk
+	metric, ok := r.Context().Value(metricKey).(models.Metrics)
 
-	if newMetric {
-		metric, err = models.NewMetric(ctx.Value(metricTypeKey).(string), ctx.Value(metricNameKey).(string))
-		if err == nil {
-			metricOk = true
-		}
+	if !ok {
+		log.Debug().Msg("Failed to fetch metric from request")
+		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
-	metricValue, valOk := ctx.Value(metricValueKey).(string)
-	err = metric.Update(metricValue)
-
-	if metricOk && valOk && (err == nil) {
-		if newMetric { c.storage.Set(metric.MType + metric.ID, metric) }
-		response, err := json.Marshal(metric)
-
-		if err != nil {
-			log.Debug().
-				Err(err).
-				Str("metricID", metric.ID).
-				Str("metricType", metric.MType).
-				Msg("marshal error")
-				w.WriteHeader(http.StatusInternalServerError)
+	if m, err := c.storage.Get(r.Context(), metric.Key()); err != nil {
+		if !errors.Is(err, repository.ErrNotFound) {
+			log.Debug().Err(err).Msg("Failed to fetch metric")
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-
-		w.Write(response)
 	} else {
-		w.WriteHeader(http.StatusBadRequest)
+		err := m.Update(metric.StringValue())
+		if err != nil {
+			log.Debug().Err(err).Msg("Failed to update metric")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		metric = m
 	}
+
+	err := c.storage.Set(r.Context(), metric)
+	if err != nil {
+		log.Debug().Err(err).Str("metricID", metric.ID).Str("metricType", metric.MType).Msg("storage set err")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	response, err := json.Marshal(metric)
+
+	if err != nil {
+		log.Debug().Err(err).Str("metricID", metric.ID).Str("metricType", metric.MType).Msg("marshal error")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(response)
+}
+
+func (c *metricsController) updates(w http.ResponseWriter, r *http.Request) {
+	metrics, ok := r.Context().Value(metricsKey).([]models.Metrics)
+	if !ok {
+		log.Debug().Msg("update error: recieved nothing from body")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	tmpstore := map[string]models.Metrics{}
+	for _, metric := range metrics {
+		if m, err := c.storage.Get(r.Context(), metric.Key()); err != nil {
+			if !errors.Is(err, repository.ErrNotFound) {
+				log.Debug().Err(err).Msg("Failed to fetch metric")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			tmpmetric, ok := tmpstore[metric.Key()]
+			if ok {
+				err := tmpmetric.Update(metric.StringValue())
+				if err != nil {
+					log.Debug().Err(err).Msg("Failed to update metric")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				tmpstore[metric.Key()] = tmpmetric
+			} else {
+
+				tmpstore[metric.Key()] = metric
+			}
+		} else {
+			err := m.Update(metric.StringValue())
+			if err != nil {
+				log.Debug().Err(err).Msg("Failed to update metric")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			tmpstore[m.Key()] = m
+		}
+	}
+
+	err := c.storage.BulkSet(r.Context(), slices.Collect(maps.Values(tmpstore)))
+
+	if err != nil {
+		log.Debug().Err(err).Msg("storage bulkset err")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	response, err := json.Marshal(metrics)
+
+	if err != nil {
+		log.Debug().Err(err).Msg("marshal error")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Write(response)
+}
+
+func (c *metricsController) ping(w http.ResponseWriter, r *http.Request) {
+	if err := c.storage.Ping(r.Context()); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			log.Debug().
+				Str("pg message", pgErr.Message).
+				Err(err).
+				Msg("failed to ping database")
+			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			log.Debug().
+				Err(err).
+				Msg("failed to ping database")
+				w.WriteHeader(http.StatusInternalServerError)
+		}
+			return
+	}
+
+	w.Write([]byte("Success"))
 }

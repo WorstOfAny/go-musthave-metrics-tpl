@@ -6,6 +6,7 @@ import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"iter"
 	"sync"
+	"encoding/json"
 )
 
 type Stats struct {
@@ -158,4 +159,12 @@ func(s *Stats) Update() error {
 	s.mu.Unlock()
 
 	return nil
+}
+
+func (s *Stats) MarshalJSON() ([]byte, error) {
+	res, err := json.Marshal(s.metrics)
+
+	if err != nil { return nil, err }
+
+	return res, nil
 }

@@ -3,6 +3,7 @@ package handler
 import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 	pgconn "github.com/jackc/pgconn"
@@ -19,14 +20,16 @@ import(
 	"errors"
 	"maps"
 	"slices"
+	"bytes"
 )
 
 type metricsController struct {
 	storage repository.Repository
+	key string
 }
 
-func NewMetricsController(storage repository.Repository) *metricsController {
-	return &metricsController{storage: storage}
+func NewMetricsController(storage repository.Repository, key string) *metricsController {
+	return &metricsController{storage: storage, key: key}
 }
 
 type responseData struct {
@@ -36,6 +39,22 @@ type responseData struct {
 type responseWriter struct {
 	http.ResponseWriter
 	responseData *responseData
+	key string
+}
+
+func (wr *responseWriter) Write(b []byte) (int, error) {
+	if wr.key != "" {
+		signedBody := service.SignToString(b, wr.key)
+		wr.ResponseWriter.Header().Set("HashSHA256", signedBody)
+	}
+	size, err := wr.ResponseWriter.Write(b)
+	wr.responseData.size += size
+	return size, err
+}
+
+func (wr *responseWriter) WriteHeader(statusCode int) {
+	wr.ResponseWriter.WriteHeader(statusCode)
+	wr.responseData.status = statusCode
 }
 
 type gzipWriter struct {
@@ -47,16 +66,6 @@ func (w gzipWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
-func (wr *responseWriter) Write(b []byte) (int, error) {
-	size, err := wr.ResponseWriter.Write(b)
-	wr.responseData.size += size
-	return size, err
-}
-
-func (wr *responseWriter) WriteHeader(statusCode int) {
-	wr.ResponseWriter.WriteHeader(statusCode)
-	wr.responseData.status = statusCode
-}
 
 type ctxKey string
 
@@ -66,7 +75,7 @@ const(
 )
 
 func (c *metricsController) ApplyTo(mux chi.Router) {
-	mux.Use(recoveryPanic, decodeRequest, logRequest)
+	mux.Use(recoveryPanic, c.checkHMAC, decodeRequest, c.logRequest)
 	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)
 	mux.With(textPlainTypeSet).Get("/ping", c.ping)
 
@@ -83,8 +92,8 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainPostCtx).Post("/", c.update)
 		})
 	})
-	mux.With(jsonTypeSet, jsonTypeCheck, c.bulkJsonCtx, encodeResponse).Post("/updates/", c.updates)
-	mux.With(jsonTypeSet, jsonTypeCheck, c.bulkJsonCtx, encodeResponse).Post("/updates", c.updates)
+	mux.With(jsonTypeSet, jsonTypeCheck, c.bulkJSONCtx, encodeResponse).Post("/updates/", c.updates)
+	mux.With(jsonTypeSet, jsonTypeCheck, c.bulkJSONCtx, encodeResponse).Post("/updates", c.updates)
 }
 
 func recoveryPanic(next http.Handler) http.Handler {
@@ -104,7 +113,7 @@ func recoveryPanic(next http.Handler) http.Handler {
 	})
 }
 
-func logRequest(next http.Handler) http.Handler {
+func (c *metricsController) logRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		reqDump, err := httputil.DumpRequest(r, true)
@@ -115,9 +124,9 @@ func logRequest(next http.Handler) http.Handler {
 				Msg("dump request error")
 		}
 
-		fmt.Println(string(reqDump))
+		log.Info().Str("req_dump", string(reqDump)).Msg("")
 		responseD := &responseData{status: http.StatusOK}
-		lw := responseWriter{ResponseWriter: w, responseData: responseD}
+		lw := responseWriter{ResponseWriter: w, responseData: responseD, key: c.key}
 
 		next.ServeHTTP(&lw, r)
 
@@ -130,6 +139,32 @@ func logRequest(next http.Handler) http.Handler {
 			Int("response_size", responseD.size).
 			Str("response_content_type", lw.Header().Get("Content-Type")).
 			Msg("")
+	})
+}
+
+func (c *metricsController) checkHMAC(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		msg := r.Header.Get("HashSHA256")
+		if c.key != "" && msg != "" {
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err != nil {
+				log.Debug().Err(err).Msg("failed read body")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			r.Body.Close()
+
+			err = service.Equal(msg, bodyBytes, c.key)
+			if err != nil {
+				log.Debug().Err(err).Msg("hmac check fail")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -188,7 +223,7 @@ func (c *metricsController) jsonCtx(next http.Handler) http.Handler {
 	})
 }
 
-func (c *metricsController) bulkJsonCtx(next http.Handler) http.Handler {
+func (c *metricsController) bulkJSONCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqMetrics []models.Metrics
 		if !decodeMetrics(w, r, &reqMetrics) { return }
@@ -267,7 +302,6 @@ func metricErrorHandler(w http.ResponseWriter, r *http.Request, err error, logMs
 
 	var metrErr *models.MetricError
 	if errors.As(err, &metrErr) {
-		fmt.Println(metrErr.Cause())
 		switch metrErr.Cause() {
 			case models.EmptyID: w.WriteHeader(http.StatusNotFound)
 			case models.EmptyValue, models.WrongType, models.InvalidFloat, models.InvalidInt: w.WriteHeader(http.StatusBadRequest)

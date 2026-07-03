@@ -33,14 +33,14 @@ func NewAgent(client *client.Client, stats *stats.Stats, ratelimit int, reportIn
 func (a *agent) Start(ctx context.Context) error {
 	g, errGrCtx := errgroup.WithContext(ctx)
 	reportJobs := jobsGenerator(errGrCtx, a.reportMetrics, a.reportDelay)
-	updateRtJobs := jobsGenerator(errGrCtx, a.stats.UpdateRT, a.pollDelay)
-	updateVmJobs := jobsGenerator(errGrCtx, a.stats.UpdateVM, a.pollDelay)
+	updateRTJobs := jobsGenerator(errGrCtx, a.stats.UpdateRT, a.pollDelay)
+	updateVMJobs := jobsGenerator(errGrCtx, a.stats.UpdateVM, a.pollDelay)
 
 	for i := 1; i <= a.rateLimit; i++ {
 		worker(g, reportJobs)
 	}
-	worker(g, updateRtJobs)
-	worker(g, updateVmJobs)
+	worker(g, updateRTJobs)
+	worker(g, updateVMJobs)
 
 	fmt.Println("Agent working, for exit press Ctrl+C")
 

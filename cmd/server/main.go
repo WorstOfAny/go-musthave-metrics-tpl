@@ -3,6 +3,7 @@ package main
 import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/observers"
 	"github.com/go-chi/chi/v5"
 	"net/http"
 	"context"
@@ -10,6 +11,8 @@ import(
 	"syscall"
 	"fmt"
 	"github.com/rs/zerolog/log"
+	"errors"
+	"time"
 )
 
 func main() {
@@ -17,6 +20,15 @@ func main() {
 	err := parseFlags(cfg)
 	if err != nil { panic(fmt.Errorf("failed to parse flags: %w", err)) }
 	if err := run(cfg); err != nil {
+
+		if errors.Is(err, context.Canceled) {
+			log.Info().Err(err).Msg("server gracefully shutted down")
+			return
+		}
+		if errors.Is(err, http.ErrServerClosed) {
+			log.Info().Err(err).Msg("server gracefully shutted down")
+			return
+		}
 		log.Debug().Err(err).Msg("server run error")
 		panic(err)
 	}
@@ -26,28 +38,43 @@ func run(cfg *config) (err error) {
 	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancelFunc()
 
-	errCh := make(chan error, 2)
-
-	repo, err := repository.NewRepository(ctx, errCh, cfg.RepoConfig)
+	repo, err := repository.NewRepository(ctx, cfg.RepoConfig)
 	if err != nil { return fmt.Errorf("failed to initialize repository: %w", err) }
 
-	c := handler.NewMetricsController(repo, cfg.Key)
+	c := handler.NewMetricsController(ctx, repo, cfg.Key)
+	var auditOpts []observers.AuditOptionFunc
+	if cfg.AuditFile != "" {
+		auditOpts = append(auditOpts, observers.WithFile(ctx, cfg.AuditFile))
+	}
+	if cfg.AuditURL != "" {
+		auditOpts = append(auditOpts, observers.WithURL(cfg.AuditURL))
+	}
+	audit, err := observers.NewAudit(auditOpts...)
+	
+	if err != nil {
+		return fmt.Errorf("failed to initialize audit observer: %w", err)
+	}
+	c.Register(audit)
 	r := chi.NewRouter()
 	c.ApplyTo(r)
 
-	go runServer(errCh, cfg.RunAddr, r)
-
-	for {
-		select {
-			case <-ctx.Done(): return nil
-			case err = <-errCh: return fmt.Errorf("server error: %w", err)
-		}
-	}
+	err = runServer(ctx, cfg.RunAddr, r)
+	return err
 }
 
-func runServer(errCh chan error, addr string, r *chi.Mux) {
-	fmt.Println("Server working, for exit press Ctrl+C")
+func runServer(ctx context.Context, addr string, r *chi.Mux) error {
+	log.Info().Msgf("server run on: %v", addr)
 	srv := &http.Server{Addr: addr, Handler: r}
 	defer srv.Close()
-	errCh <- srv.ListenAndServe()
+
+	go func() {
+		<- ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5 * time.Second)
+		defer shutdownCancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Info().Err(err).Msg("server forced to shutdown")
+		}
+	}()
+	return srv.ListenAndServe()
 }

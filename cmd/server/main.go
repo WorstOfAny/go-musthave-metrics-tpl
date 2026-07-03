@@ -31,7 +31,7 @@ func run(cfg *config) (err error) {
 	repo, err := repository.NewRepository(ctx, errCh, cfg.RepoConfig)
 	if err != nil { return fmt.Errorf("failed to initialize repository: %w", err) }
 
-	c := handler.NewMetricsController(repo)
+	c := handler.NewMetricsController(repo, cfg.Key)
 	r := chi.NewRouter()
 	c.ApplyTo(r)
 

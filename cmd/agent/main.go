@@ -2,12 +2,14 @@ package main
 
 import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/agent"
-	"time"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
 	"fmt"
 	"os/signal"
 	"syscall"
 	"context"
 	"github.com/rs/zerolog/log"
+	"net/url"
 )
 
 func main() {
@@ -24,18 +26,15 @@ func run(cfg *config) (err error) {
 	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancelFunc()
 
-	a := agent.NewAgent(cfg.ReportAddr)
-	errCh := make(chan error, 2)
+	s := stats.NewStats()
+	c := client.NewClient((&url.URL{ Scheme: "http", Host: cfg.ReportAddr }).String(), cfg.Key)
 
-	go a.UpdateWorker.Run(ctx, errCh, time.Duration(cfg.PollInterval) * time.Second)
-	go a.ReportWorker.Run(ctx, errCh, time.Duration(cfg.ReportInterval) * time.Second)
+	a := agent.NewAgent(c, s, cfg.RateLimit, cfg.ReportInterval, cfg.PollInterval)
+	err = a.Start(ctx)
 
-	fmt.Println("Agent working, for exit press Ctrl+C")
-
-	for {
-		select {
-			case <-ctx.Done(): return nil
-			case err = <-errCh: return fmt.Errorf("worker error: %w", err)
-		}
+	if err != nil {
+		return fmt.Errorf("agent error: %w", err)
 	}
+
+	return nil
 }

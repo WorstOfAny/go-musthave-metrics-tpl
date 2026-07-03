@@ -12,16 +12,30 @@ import(
 	"syscall"
 	"net"
 	"net/http"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
+	"fmt"
 )
 
 type Client struct {
 	client *resty.Client
 }
 
-func NewClient() *Client {
+func NewClient(baseURL string, key string) *Client {
 	restyC := resty.New()
 	restyC.
+		SetBaseURL(baseURL).
 		SetTimeout(time.Second * 15).
+		OnBeforeRequest(func(c *resty.Client, req *resty.Request) error {
+			if key != "" {
+				data, ok := req.Body.([]byte)
+				if !ok {
+					return fmt.Errorf("failed type assertion")
+				}
+				result := service.SignToString(data, key)
+				req.SetHeader("HashSHA256", result)
+			}
+			return nil
+		}).
 		SetRetryCount(3).
 		SetRetryMaxWaitTime(15 * time.Second).
 		SetRetryAfter(func(c *resty.Client, r *resty.Response) (time.Duration, error) {
@@ -43,7 +57,7 @@ func NewClient() *Client {
 	return &Client{ client: restyC }
 }
 
-func (c *Client) Post(u string, body []byte) error {
+func (c *Client) Post(action string, body []byte) error {
 	var cbody bytes.Buffer
 	gw, err := gzip.NewWriterLevel(&cbody, gzip.BestCompression)
 	if err != nil { return err }
@@ -58,7 +72,7 @@ func (c *Client) Post(u string, body []byte) error {
 		SetHeader("Content-Encoding", "gzip").
 		SetHeader("Accept-Encoding", "gzip").
 		SetBody(cbody.Bytes()).
-		Post(u)
+		Post(action)
 
 	if err != nil {
 		log.Debug().Err(err).Msg("request err")

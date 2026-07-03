@@ -7,11 +7,17 @@ import(
 	"iter"
 	"sync"
 	"encoding/json"
+	mem "github.com/shirou/gopsutil/v4/mem"
+	cpu "github.com/shirou/gopsutil/v4/cpu"
+	"fmt"
+	"slices"
+	"strings"
+	"strconv"
 )
 
 type Stats struct {
 	memstats *runtime.MemStats
-	metrics [29]models.Metrics
+	metrics []models.Metrics
 	mu sync.Mutex
 
 	Alloc *float64
@@ -43,6 +49,9 @@ type Stats struct {
 	TotalAlloc *float64
 	RandomValue *float64
 	PollCount *int64
+	TotalMemory *float64
+	FreeMemory *float64
+	CPUutilization1 *float64
 }
 
 func NewStats() (*Stats) {
@@ -77,9 +86,12 @@ func NewStats() (*Stats) {
 		TotalAlloc: new(float64),
 		RandomValue: new(float64),
 		PollCount: new(int64),
+		TotalMemory: new(float64),
+		FreeMemory: new(float64),
+		CPUutilization1: new(float64),
 	}
 
-	stats.metrics = [29]models.Metrics{
+	stats.metrics = []models.Metrics{
 		models.Metrics{ID: "Alloc", MType: models.Gauge, Value: stats.Alloc},
 		models.Metrics{ID: "BuckHashSys", MType: models.Gauge, Value: stats.BuckHashSys},
 		models.Metrics{ID: "Frees", MType: models.Gauge, Value: stats.Frees},
@@ -109,6 +121,8 @@ func NewStats() (*Stats) {
 		models.Metrics{ID: "TotalAlloc", MType: models.Gauge, Value: stats.TotalAlloc},
 		models.Metrics{ID: "RandomValue", MType: models.Gauge, Value: stats.RandomValue},
 		models.Metrics{ID: "PollCount", MType: models.Counter, Delta: stats.PollCount},
+		models.Metrics{ID: "TotalMemory", MType: models.Gauge, Value: stats.TotalMemory},
+		models.Metrics{ID: "FreeMemory", MType: models.Gauge, Value: stats.FreeMemory},
 	}
 
 	return stats
@@ -122,8 +136,35 @@ func(s *Stats) AllMetrics() iter.Seq[*models.Metrics] {
 	}
 }
 
-func(s *Stats) Update() error {
+func(s *Stats) UpdateVM() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	vmemStats, err := mem.VirtualMemory()
+	if err != nil {
+		return fmt.Errorf("failde fetch virtual memory stats: %w", err)
+	}
+	cpuUtilization, err := cpu.Percent(0, true)
+	if err != nil {
+		return fmt.Errorf("failde fetch cpu utilization: %w", err)
+	}
+
+	s.metrics = slices.DeleteFunc(s.metrics, func(m models.Metrics) bool {
+		return strings.HasPrefix(m.ID, "CPUutilization")
+	})
+
+	for i, f := range cpuUtilization {
+		s.metrics = append(s.metrics, models.Metrics{ID: "CPUutilization" + strconv.Itoa(i), MType: models.Gauge, Value: &f})
+	}
+	*s.TotalMemory = float64(vmemStats.Total)
+	*s.FreeMemory = float64(vmemStats.Free)
+
+	return nil
+}
+
+func(s *Stats) UpdateRT() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	runtime.ReadMemStats(s.memstats)
 
 	*s.Alloc = float64(s.memstats.Alloc)
@@ -156,12 +197,13 @@ func(s *Stats) Update() error {
 
 	*s.PollCount += 1
 	*s.RandomValue = rand.Float64()
-	s.mu.Unlock()
 
 	return nil
 }
 
 func (s *Stats) MarshalJSON() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	res, err := json.Marshal(s.metrics)
 
 	if err != nil { return nil, err }

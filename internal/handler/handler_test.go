@@ -380,7 +380,7 @@ func runCases(t *testing.T, cases []requestCase, metrics []models.Metrics) {
 
 		if err != nil { t.Fatal(err) }
 
-		c := NewMetricsController(repo)
+		c := NewMetricsController(repo, "")
 		for _, v := range metrics { c.storage.Set(ctx, v) }
 		mux := chi.NewRouter()
 		c.ApplyTo(mux)

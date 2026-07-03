@@ -18,7 +18,7 @@ func TestUpdate(t *testing.T) {
 	t.Run("Should update object fields", func(t *testing.T) {
 		oldPollCount := *s.PollCount
 		oldRandomValue := *s.RandomValue
-		s.Update()
+		s.UpdateRT()
 		assert.NotEqual(t, oldPollCount, *s.PollCount)
 		assert.NotEqual(t, oldRandomValue, *s.RandomValue)
 	})

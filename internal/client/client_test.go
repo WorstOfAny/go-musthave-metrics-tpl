@@ -9,11 +9,10 @@ import(
 )
 
 func TestNewClient(t *testing.T) {
-	NewClient()
+	NewClient("", "")
 }
 
 func TestPost(t *testing.T) {
-	c := NewClient()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
@@ -22,8 +21,9 @@ func TestPost(t *testing.T) {
 		defer gz.Close()
 		gz.Write([]byte("{\"a\": 1}"))
 	}))
+	c := NewClient(ts.URL, "")
 
-	err := c.Post(ts.URL, []byte("{}"))
+	err := c.Post("", []byte("{}"))
 	assert.NoError(t, err)
 
 	ts.Close()

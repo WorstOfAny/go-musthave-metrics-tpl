@@ -5,69 +5,90 @@ import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
 	"time"
 	"context"
-	"net/url"
 	"encoding/json"
 	"sync"
-	"github.com/rs/zerolog/log"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 )
 
 type agent struct {
 	stats *stats.Stats
 	client *client.Client
-	reportURL *url.URL
+	rateLimit int
+	reportDelay time.Duration
+	pollDelay time.Duration
 	mu sync.Mutex
-	UpdateWorker *worker
-	ReportWorker *worker
 }
 
-func NewAgent(reportAddr string) *agent {
-	a := agent{
-		stats: stats.NewStats(),
-		client: client.NewClient(),
-		reportURL: &url.URL{ Scheme: "http", Host: reportAddr },
+func NewAgent(client *client.Client, stats *stats.Stats, ratelimit int, reportInterval int, pollInterval int) *agent {
+	return &agent{
+		stats: stats,
+		client: client,
+		rateLimit: ratelimit,
+		reportDelay: time.Duration(reportInterval) * time.Second,
+		pollDelay: time.Duration(pollInterval) * time.Second,
+	}
+}
+
+func (a *agent) Start(ctx context.Context) error {
+	g, errGrCtx := errgroup.WithContext(ctx)
+	reportJobs := jobsGenerator(errGrCtx, a.reportMetrics, a.reportDelay)
+	updateRtJobs := jobsGenerator(errGrCtx, a.stats.UpdateRT, a.pollDelay)
+	updateVmJobs := jobsGenerator(errGrCtx, a.stats.UpdateVM, a.pollDelay)
+
+	for i := 1; i <= a.rateLimit; i++ {
+		worker(g, reportJobs)
+	}
+	worker(g, updateRtJobs)
+	worker(g, updateVmJobs)
+
+	fmt.Println("Agent working, for exit press Ctrl+C")
+
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("worker error: %w", err)
 	}
 
-	a.UpdateWorker = &worker{ action: a.stats.Update }
-	a.ReportWorker = &worker{ action: a.reportMetrics }
-
-	return &a
+	return nil
 }
 
-type worker struct {
-	action func() error
-	mu sync.Mutex
-}
-
-func (w *worker) Run(ctx context.Context, errCh chan error, delay time.Duration) (err error) {
-	for {
-		select {
-			case <-ctx.Done(): return
-			case <-time.After(delay):
-				w.mu.Lock()
-				err = w.action()
-				if err != nil {
-					log.Debug().Err(err).Msg("worker action err")
-					errCh <- fmt.Errorf("failed to execute worker action: %w", err)
-					return
-				}
-				w.mu.Unlock()
+func jobsGenerator(ctx context.Context, job func() error, delay time.Duration) chan func() error {
+	jobs := make(chan func() error)
+	go func() {
+		defer close(jobs)
+		for {
+			select {
+				case <-ctx.Done(): return
+				case <-time.After(delay): jobs <- job
+			}
 		}
-	}
+	}()
+
+	return jobs
+}
+
+func worker(g *errgroup.Group, jobs <-chan func() error) {
+	g.Go(func() error {
+		for j := range jobs {
+			err := j()
+			if err != nil { return err }
+		}
+
+		return nil
+	})
 }
 
 func (a *agent) reportMetrics() (error) {
 	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	body, err := json.Marshal(a.stats)
 	if err != nil { return fmt.Errorf("failed to marshal data: %w", err) }
 
-	err = a.client.Post(a.reportURL.String() + "/updates", body)
+	err = a.client.Post("/updates", body)
 	if err != nil {
 		return fmt.Errorf("failed to send data to server: %w", err)
 	}
 
 	*a.stats.PollCount = 0
-	a.mu.Unlock()
 	return nil
 }

@@ -1,24 +1,26 @@
 package client
 
-import(
-	"errors"
-	"strconv"
-	"time"
-	"io"
-	"github.com/go-resty/resty/v2"
-	"compress/gzip"
+import (
 	"bytes"
-	"github.com/rs/zerolog/log"
-	"syscall"
+	"compress/gzip"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
-	"fmt"
+	"strconv"
 	"sync"
+	"syscall"
+	"time"
+
+	"github.com/go-resty/resty/v2"
+	"github.com/rs/zerolog/log"
+
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
 )
 
 type Client struct {
-	client *resty.Client
+	client     *resty.Client
 	bufferPool *sync.Pool
 }
 
@@ -41,20 +43,24 @@ func NewClient(baseURL string, key string) *Client {
 		SetRetryCount(3).
 		SetRetryMaxWaitTime(15 * time.Second).
 		SetRetryAfter(func(c *resty.Client, r *resty.Response) (time.Duration, error) {
-			delay := time.Duration(2 * (r.Request.Attempt) - 1) * time.Second
+			delay := time.Duration(2*(r.Request.Attempt)-1) * time.Second
 			return delay, nil
 		}).
 		AddRetryCondition(func(r *resty.Response, err error) bool {
 			if err != nil {
 				var netErr net.Error
 				log.Debug().Err(err).Msg("request err")
-				if errors.As(err, &netErr) && netErr.Timeout() { return true }
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					return true
+				}
 				return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.EOF)
 			}
 			return r.StatusCode() == http.StatusTooManyRequests || r.StatusCode() > 499
 		}).
 		AddRetryHook(func(r *resty.Response, err error) {
-			if err != nil { log.Debug().Str("attempt", strconv.Itoa(r.Request.Attempt)).Err(err).Msg("Request attempt") }
+			if err != nil {
+				log.Debug().Str("attempt", strconv.Itoa(r.Request.Attempt)).Err(err).Msg("Request attempt")
+			}
 		})
 
 	cl := &Client{client: restyC}
@@ -71,7 +77,9 @@ func NewClient(baseURL string, key string) *Client {
 func (c *Client) Post(action string, body []byte) error {
 	cbody := c.bufferPool.Get().(*bytes.Buffer)
 	gw, err := gzip.NewWriterLevel(cbody, gzip.BestCompression)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	gw.Write(body)
 	gw.Close()
@@ -88,13 +96,12 @@ func (c *Client) Post(action string, body []byte) error {
 	cbody.Reset()
 	c.bufferPool.Put(cbody)
 
-
 	if err != nil {
 		log.Debug().Err(err).Msg("request err")
 		return err
 	}
 	defer resp.RawResponse.Body.Close()
-	
+
 	gr, err := gzip.NewReader(resp.RawResponse.Body)
 	if err != nil {
 		log.Debug().Err(err).Msg("gzip reader error")

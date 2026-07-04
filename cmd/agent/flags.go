@@ -1,17 +1,18 @@
 package main
 
-import(
+import (
 	"flag"
-	"github.com/caarlos0/env/v11"
 	"fmt"
+
+	"github.com/caarlos0/env/v11"
 )
 
 type config struct {
-	ReportAddr string `env:"ADDRESS"`
-	Key string `env:"KEY"`
-	PollInterval int `env:"POLL_INTERVAL"`
-	ReportInterval int `env:"REPORT_INTERVAL"`
-	RateLimit int `env:"RATE_LIMIT"`
+	ReportAddr     string `env:"ADDRESS"`
+	Key            string `env:"KEY"`
+	PollInterval   int    `env:"POLL_INTERVAL"`
+	ReportInterval int    `env:"REPORT_INTERVAL"`
+	RateLimit      int    `env:"RATE_LIMIT"`
 }
 
 func parseFlags(cfg *config) (err error) {

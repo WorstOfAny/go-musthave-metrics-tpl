@@ -1,17 +1,19 @@
 package main
 
-import(
+import (
 	"flag"
-	"github.com/caarlos0/env/v11"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 	"fmt"
+
+	"github.com/caarlos0/env/v11"
+
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 )
 
 type config struct {
-	RunAddr string `env:"ADDRESS"`
-	Key string `env:"KEY"`
-	AuditURL string `env:"AUDIT_FILE"`
-	AuditFile string `env:"AUDIT_URL"`
+	RunAddr    string `env:"ADDRESS"`
+	Key        string `env:"KEY"`
+	AuditURL   string `env:"AUDIT_FILE"`
+	AuditFile  string `env:"AUDIT_URL"`
 	RepoConfig repository.Config
 }
 

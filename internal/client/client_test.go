@@ -1,10 +1,11 @@
 package client
 
-import(
-	"net/http/httptest"
-	"net/http"
-	"testing"
+import (
 	"compress/gzip"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 )
 

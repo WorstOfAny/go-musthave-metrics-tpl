@@ -1,9 +1,11 @@
 package stats
 
-import(
+import (
 	"testing"
+
 	"github.com/stretchr/testify/assert"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+
+	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 )
 
 func TestNewStats(t *testing.T) {
@@ -28,7 +30,7 @@ func TestAllMetrics(t *testing.T) {
 	s := NewStats()
 
 	t.Run("Should iterate through stats metrics", func(t *testing.T) {
-		for v:= range s.AllMetrics() {
+		for v := range s.AllMetrics() {
 			assert.IsType(t, models.Metrics{}, *v)
 		}
 		for v := range s.AllMetrics() {
@@ -37,4 +39,3 @@ func TestAllMetrics(t *testing.T) {
 		}
 	})
 }
-

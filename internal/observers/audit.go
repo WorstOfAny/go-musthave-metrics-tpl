@@ -1,15 +1,17 @@
 package observers
 
-import(
+import (
 	"bufio"
-	"sync"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
-	"os"
-	"time"
 	"context"
-	"fmt"
 	"encoding/json"
+	"fmt"
+	"os"
+	"sync"
+	"time"
+
 	"github.com/rs/zerolog/log"
+
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
 )
 
 type Observer interface {
@@ -18,14 +20,14 @@ type Observer interface {
 
 type audit struct {
 	client *client.Client
-	file *os.File
-	mu sync.Mutex
+	file   *os.File
+	mu     sync.Mutex
 }
 
 type Event struct {
 	Metrics []string
-	TS time.Time
-	IPAddr string
+	TS      time.Time
+	IPAddr  string
 }
 
 type AuditOptionFunc func(*audit) error
@@ -35,7 +37,9 @@ func NewAudit(opts ...AuditOptionFunc) (Observer, error) {
 
 	for _, opt := range opts {
 		err := opt(audit)
-		if err != nil { return nil, fmt.Errorf("failed apply option for constructor: %w", err) }
+		if err != nil {
+			return nil, fmt.Errorf("failed apply option for constructor: %w", err)
+		}
 	}
 
 	return audit, nil
@@ -52,17 +56,18 @@ func WithURL(url string) AuditOptionFunc {
 func WithFile(ctx context.Context, filename string) AuditOptionFunc {
 	return func(a *audit) error {
 		file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-		if err != nil { return fmt.Errorf("failed to open file: %w", err) }
+		if err != nil {
+			return fmt.Errorf("failed to open file: %w", err)
+		}
 
 		go func() {
-			<- ctx.Done()
+			<-ctx.Done()
 			file.Close()
 		}()
 		a.file = file
 		return nil
 	}
 }
-
 
 func (a *audit) Update(e Event) {
 	go a.writeToFile(e)

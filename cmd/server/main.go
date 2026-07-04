@@ -1,24 +1,28 @@
 package main
 
-import(
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/observers"
-	"github.com/go-chi/chi/v5"
-	"net/http"
+import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"os/signal"
 	"syscall"
-	"fmt"
-	"github.com/rs/zerolog/log"
-	"errors"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
+
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/handler"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/observers"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 )
 
 func main() {
 	cfg := &config{}
 	err := parseFlags(cfg)
-	if err != nil { panic(fmt.Errorf("failed to parse flags: %w", err)) }
+	if err != nil {
+		panic(fmt.Errorf("failed to parse flags: %w", err))
+	}
 	if err := run(cfg); err != nil {
 
 		if errors.Is(err, context.Canceled) {
@@ -39,7 +43,9 @@ func run(cfg *config) (err error) {
 	defer cancelFunc()
 
 	repo, err := repository.NewRepository(ctx, cfg.RepoConfig)
-	if err != nil { return fmt.Errorf("failed to initialize repository: %w", err) }
+	if err != nil {
+		return fmt.Errorf("failed to initialize repository: %w", err)
+	}
 
 	c := handler.NewMetricsController(ctx, repo, cfg.Key)
 	var auditOpts []observers.AuditOptionFunc
@@ -50,7 +56,7 @@ func run(cfg *config) (err error) {
 		auditOpts = append(auditOpts, observers.WithURL(cfg.AuditURL))
 	}
 	audit, err := observers.NewAudit(auditOpts...)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to initialize audit observer: %w", err)
 	}
@@ -68,8 +74,8 @@ func runServer(ctx context.Context, addr string, r *chi.Mux) error {
 	defer srv.Close()
 
 	go func() {
-		<- ctx.Done()
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5 * time.Second)
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {

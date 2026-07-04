@@ -1,40 +1,42 @@
 package handler
 
-import(
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"net/http/httputil"
+	"net/http/pprof"
+	"runtime/debug"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	pgconn "github.com/jackc/pgconn"
+	"github.com/rs/zerolog/log"
+
+	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/observers"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/observers"
-	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog/log"
-	pgconn "github.com/jackc/pgconn"
-	"net/http"
-	"net/http/pprof"
-	"strings"
-	"context"
-	"fmt"
-	"time"
-	"encoding/json"
-	"net/http/httputil"
-	"compress/gzip"
-	"io"
-	"runtime/debug"
-	"errors"
-	"maps"
-	"slices"
-	"bytes"
 )
 
 type metricsController struct {
-	storage repository.Repository
-	observers []observers.Observer
+	storage        repository.Repository
+	observers      []observers.Observer
 	metricsEventCh chan observers.Event
-	key string
+	key            string
 }
 
 type MetricsEvent struct {
 	metrics []string
-	ts time.Time
+	ts      time.Time
 	ip_addr string
 }
 
@@ -44,15 +46,15 @@ func NewMetricsController(ctx context.Context, storage repository.Repository, ke
 	go func() {
 		for {
 			select {
-				case <-ctx.Done():
-					close(controller.metricsEventCh)
-					return
-				case event := <-controller.metricsEventCh:
-					go func(e observers.Event) {
-						for _, obs := range controller.observers {
-							obs.Update(e)
-						}
-					}(event)
+			case <-ctx.Done():
+				close(controller.metricsEventCh)
+				return
+			case event := <-controller.metricsEventCh:
+				go func(e observers.Event) {
+					for _, obs := range controller.observers {
+						obs.Update(e)
+					}
+				}(event)
 			}
 		}
 	}()
@@ -74,12 +76,12 @@ func (c *metricsController) newEvent(metrics []models.Metrics, ip_addr string) {
 
 type responseData struct {
 	status int
-	size int
+	size   int
 }
 type responseWriter struct {
 	http.ResponseWriter
 	responseData *responseData
-	key string
+	key          string
 }
 
 func (wr *responseWriter) Write(b []byte) (int, error) {
@@ -106,11 +108,10 @@ func (w gzipWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
-
 type ctxKey string
 
-const(
-	metricKey ctxKey = "metric"
+const (
+	metricKey  ctxKey = "metric"
 	metricsKey ctxKey = "metrics"
 )
 
@@ -129,7 +130,7 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 
 	mux.Route("/value", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.showJSON)
-		r.Route("/{metricType}/{metricName}", func(r chi.Router){
+		r.Route("/{metricType}/{metricName}", func(r chi.Router) {
 			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainGetCtx).Get("/", c.showTextPlain)
 		})
 	})
@@ -264,7 +265,9 @@ func encodeResponse(next http.Handler) http.Handler {
 func (c *metricsController) jsonCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqMetric models.Metrics
-		if !decodeMetrics(w, r, &reqMetric) { return }
+		if !decodeMetrics(w, r, &reqMetric) {
+			return
+		}
 
 		ctx := context.WithValue(r.Context(), metricKey, reqMetric)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -274,7 +277,9 @@ func (c *metricsController) jsonCtx(next http.Handler) http.Handler {
 func (c *metricsController) bulkJSONCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqMetrics []models.Metrics
-		if !decodeMetrics(w, r, &reqMetrics) { return }
+		if !decodeMetrics(w, r, &reqMetrics) {
+			return
+		}
 
 		ctx := context.WithValue(r.Context(), metricsKey, reqMetrics)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -328,7 +333,7 @@ func (c *metricsController) plainGetCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metricType := chi.URLParam(r, "metricType")
 		metricName := chi.URLParam(r, "metricName")
-		metric, err := c.storage.Get(r.Context(), metricType + metricName)
+		metric, err := c.storage.Get(r.Context(), metricType+metricName)
 
 		if err != nil {
 			metricErrorHandler(w, r, err, "error while fetching metric")
@@ -351,8 +356,10 @@ func metricErrorHandler(w http.ResponseWriter, r *http.Request, err error, logMs
 	var metrErr *models.MetricError
 	if errors.As(err, &metrErr) {
 		switch metrErr.Cause() {
-			case models.EmptyID: w.WriteHeader(http.StatusNotFound)
-			case models.EmptyValue, models.WrongType, models.InvalidFloat, models.InvalidInt: w.WriteHeader(http.StatusBadRequest)
+		case models.EmptyID:
+			w.WriteHeader(http.StatusNotFound)
+		case models.EmptyValue, models.WrongType, models.InvalidFloat, models.InvalidInt:
+			w.WriteHeader(http.StatusBadRequest)
 		}
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -569,9 +576,9 @@ func (c *metricsController) ping(w http.ResponseWriter, r *http.Request) {
 			log.Debug().
 				Err(err).
 				Msg("failed to ping database")
-				w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 		}
-			return
+		return
 	}
 
 	w.Write([]byte("Success"))

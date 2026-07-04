@@ -28,40 +28,26 @@ import (
 )
 
 type metricsController struct {
-	storage        repository.Repository
-	observers      []observers.Observer
-	metricsEventCh chan observers.Event
-	key            string
+	storage   repository.Repository
+	observers []observers.Observer
+	key       string
 }
 
-type MetricsEvent struct {
-	metrics []string
-	ts      time.Time
-	ip_addr string
-}
-
+// NewMetricsController конструктор для metricsController, возвращает указатель на metricsController
 func NewMetricsController(ctx context.Context, storage repository.Repository, key string) *metricsController {
-	controller := &metricsController{storage: storage, key: key, metricsEventCh: make(chan observers.Event)}
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				close(controller.metricsEventCh)
-				return
-			case event := <-controller.metricsEventCh:
-				go func(e observers.Event) {
-					for _, obs := range controller.observers {
-						obs.Update(e)
-					}
-				}(event)
-			}
-		}
-	}()
-
+	controller := &metricsController{storage: storage, key: key}
+	controller.observers = make([]observers.Observer, 0)
 	return controller
 }
 
+// Event событие, которое наблюдатель отслеживает
+type Event struct {
+	Metrics []string
+	TS      time.Time
+	IPAddr  string
+}
+
+// Register добавление наблюдателей для отслеживания событий
 func (c *metricsController) Register(o observers.Observer) {
 	c.observers = append(c.observers, o)
 }
@@ -71,7 +57,19 @@ func (c *metricsController) newEvent(metrics []models.Metrics, ip_addr string) {
 	for i, m := range metrics {
 		metricIDs[i] = m.ID
 	}
-	c.metricsEventCh <- observers.Event{Metrics: metricIDs, TS: time.Now(), IPAddr: ip_addr}
+
+	event := Event{Metrics: metricIDs, TS: time.Now(), IPAddr: ip_addr}
+	data, err := json.Marshal(event)
+
+	if err != nil {
+		log.Error().Err(err).Msg("marshal event error")
+		return
+	}
+
+	for _, obs := range c.observers {
+		obs.Update(data)
+	}
+
 }
 
 type responseData struct {
@@ -115,6 +113,7 @@ const (
 	metricsKey ctxKey = "metrics"
 )
 
+// ApplyTo настройка маршрутизатора mux для работы с эндпоинтами metricsController
 func (c *metricsController) ApplyTo(mux chi.Router) {
 	mux.Use(recoveryPanic, c.checkHMAC, decodeRequest, c.logRequest)
 	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)

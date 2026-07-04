@@ -20,10 +20,12 @@ type dbDecorator struct {
 	db *pgxpool.Pool
 }
 
+// NewDBDecorator конструктор для обертки над БД, возвращает обертку с интерфейсом repository.Repository
 func NewDBDecorator(db *pgxpool.Pool) *dbDecorator {
 	return &dbDecorator{db: db}
 }
 
+// Set запись метрики, вернёт ошибку, если что-то пошло не тaк
 func (dbd *dbDecorator) Set(ctx context.Context, obj models.Metrics) error {
 	_, err := retry(
 		func() (any, error) {
@@ -55,6 +57,7 @@ func (dbd *dbDecorator) Set(ctx context.Context, obj models.Metrics) error {
 	return nil
 }
 
+// BulkSet массовая запись метрик, вернёт ошибку, если что-то пойдёт не так
 func (dbd *dbDecorator) BulkSet(ctx context.Context, objs []models.Metrics) error {
 	_, err := retry(
 		func() (any, error) {
@@ -96,6 +99,7 @@ func (dbd *dbDecorator) BulkSet(ctx context.Context, objs []models.Metrics) erro
 	return nil
 }
 
+// Get получение метрики по ключу, вернёт объект models.Metrics и ошибку
 func (dbd *dbDecorator) Get(ctx context.Context, key string) (models.Metrics, error) {
 	rows, err := retry(
 		func() (any, error) {
@@ -123,6 +127,7 @@ func (dbd *dbDecorator) Get(ctx context.Context, key string) (models.Metrics, er
 	return obj, nil
 }
 
+// Remove удаление метрики по ключу
 func (dbd *dbDecorator) Remove(ctx context.Context, key string) error {
 	_, err := retry(
 		func() (any, error) {
@@ -142,6 +147,7 @@ func (dbd *dbDecorator) Remove(ctx context.Context, key string) error {
 	return nil
 }
 
+// All получение итератора по всем хранимым метрикам, вернёт ошибку, если что-то пойдёт не так
 func (dbd *dbDecorator) All(ctx context.Context) (iter.Seq[models.Metrics], error) {
 	rows, err := retry(
 		func() (any, error) {
@@ -168,6 +174,7 @@ func (dbd *dbDecorator) All(ctx context.Context) (iter.Seq[models.Metrics], erro
 	}, nil
 }
 
+// Ping проверка доступности БД
 func (dbd *dbDecorator) Ping(ctx context.Context) error {
 	_, err := retry(
 		func() (any, error) { return nil, dbd.db.Ping(ctx) },

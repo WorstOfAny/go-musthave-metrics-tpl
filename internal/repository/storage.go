@@ -23,6 +23,21 @@ type memStorage struct {
 	ds          map[string]models.Metrics
 }
 
+// NewStorage конструктор для файлового хранилища, возвращает memStorage и ошибку
+func NewStorage(storageFile *os.File, restore bool) (storage *memStorage, err error) {
+	storage = &memStorage{ds: map[string]models.Metrics{}, storageFile: storageFile}
+	if restore {
+		err = storage.restore()
+		if err != nil {
+			log.Debug().Err(err).Msg("storage restore error")
+			return nil, fmt.Errorf("failed to restore storage from storage file: %w", err)
+		}
+	}
+
+	return storage, nil
+}
+
+// Set запись метрики, вернёт ошибку, если что-то пошло не тaк
 func (s *memStorage) Set(ctx context.Context, v models.Metrics) error {
 	s.mu.Lock()
 	s.ds[v.Key()] = v
@@ -30,6 +45,7 @@ func (s *memStorage) Set(ctx context.Context, v models.Metrics) error {
 	return nil
 }
 
+// BulkSet массовая запись метрик, вернёт ошибку, если что-то пойдёт не так
 func (s *memStorage) BulkSet(ctx context.Context, vs []models.Metrics) error {
 	s.mu.Lock()
 
@@ -45,6 +61,7 @@ func (s *memStorage) BulkSet(ctx context.Context, vs []models.Metrics) error {
 	return nil
 }
 
+// Get получение метрики по ключу, вернёт объект models.Metrics и ошибку
 func (s *memStorage) Get(ctx context.Context, k string) (models.Metrics, error) {
 	var err error
 	s.mu.Lock()
@@ -56,24 +73,13 @@ func (s *memStorage) Get(ctx context.Context, k string) (models.Metrics, error) 
 	return value, err
 }
 
+// Remove удаление метрики по ключу
 func (s *memStorage) Remove(ctx context.Context, k string) error {
 	delete(s.ds, k)
 	return nil
 }
 
-func NewStorage(storageFile *os.File, restore bool) (storage *memStorage, err error) {
-	storage = &memStorage{ds: map[string]models.Metrics{}, storageFile: storageFile}
-	if restore {
-		err = storage.restore()
-		if err != nil {
-			log.Debug().Err(err).Msg("storage restore error")
-			return nil, fmt.Errorf("failed to restore storage from storage file: %w", err)
-		}
-	}
-
-	return storage, nil
-}
-
+// All получение итератора по всем хранимым метрикам, вернёт ошибку, если что-то пойдёт не так
 func (s *memStorage) All(ctx context.Context) (iter.Seq[models.Metrics], error) {
 	return func(yield func(models.Metrics) bool) {
 		for _, v := range s.ds {
@@ -84,6 +90,7 @@ func (s *memStorage) All(ctx context.Context) (iter.Seq[models.Metrics], error) 
 	}, nil
 }
 
+// WriteToFile запись в файл, перед записью файл очищается
 func (s *memStorage) WriteToFile(ctx context.Context, delay time.Duration) {
 	writer := bufio.NewWriter(s.storageFile)
 
@@ -161,6 +168,7 @@ func (s *memStorage) restore() (err error) {
 	return nil
 }
 
+// Ping заглушка для совместимости с интерфейсом repository.Repository
 func (s *memStorage) Ping(ctx context.Context) error {
 	return nil
 }

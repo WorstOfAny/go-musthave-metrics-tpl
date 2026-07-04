@@ -17,6 +17,7 @@ import (
 	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 )
 
+// Stats тип для сбора метрик runtime
 type Stats struct {
 	memstats *runtime.MemStats
 	metrics  []models.Metrics
@@ -56,6 +57,7 @@ type Stats struct {
 	CPUutilization1 *float64
 }
 
+// NewStats конструктор для создания Stats, возвращает указатель на объект Stats
 func NewStats() *Stats {
 	stats := &Stats{
 		memstats:        &runtime.MemStats{},
@@ -130,6 +132,7 @@ func NewStats() *Stats {
 	return stats
 }
 
+// AllMetrics итератор по метрикам, содержащимся в Stats
 func (s *Stats) AllMetrics() iter.Seq[*models.Metrics] {
 	return func(yield func(*models.Metrics) bool) {
 		for _, v := range s.metrics {
@@ -140,6 +143,7 @@ func (s *Stats) AllMetrics() iter.Seq[*models.Metrics] {
 	}
 }
 
+// UpdateVM сбор метрик mem и сpu
 func (s *Stats) UpdateVM() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -166,6 +170,7 @@ func (s *Stats) UpdateVM() error {
 	return nil
 }
 
+// UpdateRT сбор метрик runtime
 func (s *Stats) UpdateRT() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -3,19 +3,18 @@ package observers
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
 )
 
+// Observer интерфейс наблюдателя
 type Observer interface {
-	Update(Event)
+	Update([]byte)
 }
 
 type audit struct {
@@ -24,14 +23,7 @@ type audit struct {
 	mu     sync.Mutex
 }
 
-type Event struct {
-	Metrics []string
-	TS      time.Time
-	IPAddr  string
-}
-
-type AuditOptionFunc func(*audit) error
-
+// NewAudit конструктор для создания наблюдателя типа audit
 func NewAudit(opts ...AuditOptionFunc) (Observer, error) {
 	audit := &audit{}
 
@@ -45,6 +37,10 @@ func NewAudit(opts ...AuditOptionFunc) (Observer, error) {
 	return audit, nil
 }
 
+// AuditOptionFunc тип для функциональных опций конструктора
+type AuditOptionFunc func(*audit) error
+
+// WithURL функциональная опция для установки URL, куда будут посылаться события
 func WithURL(url string) AuditOptionFunc {
 	return func(a *audit) error {
 		client := client.NewClient(url, "")
@@ -53,6 +49,7 @@ func WithURL(url string) AuditOptionFunc {
 	}
 }
 
+// WithFile функциональная опция для установки пути к файлу, куда будут записываться события
 func WithFile(ctx context.Context, filename string) AuditOptionFunc {
 	return func(a *audit) error {
 		file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
@@ -69,24 +66,19 @@ func WithFile(ctx context.Context, filename string) AuditOptionFunc {
 	}
 }
 
-func (a *audit) Update(e Event) {
+// Update отправка данных при возникновении события
+func (a *audit) Update(e []byte) {
 	go a.writeToFile(e)
 	go a.send(e)
 }
 
-func (a *audit) writeToFile(e Event) {
+func (a *audit) writeToFile(data []byte) {
 	if a.file != nil {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 
 		writer := bufio.NewWriter(a.file)
-		data, err := json.Marshal(e)
-		if err != nil {
-			log.Debug().Err(err).Msg("marshal event err")
-			return
-		}
-
-		_, err = writer.Write(data)
+		_, err := writer.Write(data)
 		if err != nil {
 			log.Debug().Err(err).Str("data", string(data)).Msg("write event err")
 			return
@@ -102,13 +94,8 @@ func (a *audit) writeToFile(e Event) {
 	}
 }
 
-func (a *audit) send(e Event) {
+func (a *audit) send(data []byte) {
 	if a.client != nil {
-		data, err := json.Marshal(e)
-		if err != nil {
-			log.Debug().Err(err).Msg("marshal error")
-			return
-		}
 		a.client.Post("/", data)
 	}
 }

@@ -6,12 +6,16 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 
+	gomock "go.uber.org/mock/gomock"
+
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/mocks"
 	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 )
@@ -410,4 +414,126 @@ func runCases(t *testing.T, cases []requestCase, metrics []models.Metrics) {
 			}
 		})
 	}
+}
+
+type TestReporter interface {
+	Errorf(format string, args ...interface{})
+	Fatalf(format string, args ...interface{})
+}
+
+type testR struct{}
+
+func (t *testR) Errorf(f string, args ...interface{}) {}
+func (t *testR) Fatalf(f string, args ...interface{}) {}
+
+func Example() {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+	repoMock := initMockRepoForExample()
+
+	c := NewMetricsController(ctx, repoMock, "")
+	r := chi.NewRouter()
+	c.ApplyTo(r)
+
+	req := httptest.NewRequest(http.MethodPost, "/update", strings.NewReader(`{"id": "m1", "type": "gauge", "value": 123.0}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	os.Stdout.Write(rec.Body.Bytes())
+	os.Stdout.Write([]byte("\n"))
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	os.Stdout.Write(rec.Body.Bytes())
+	os.Stdout.Write([]byte("\n"))
+
+	req = httptest.NewRequest(http.MethodPost, "/updates", strings.NewReader(`[{"id": "m1", "type": "gauge", "value": 125.0}, {"id": "m2", "delta": 5, "type": "counter"}]`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	os.Stdout.Write(rec.Body.Bytes())
+	os.Stdout.Write([]byte("\n"))
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	os.Stdout.Write(rec.Body.Bytes())
+
+	// Output:
+	// {"id":"m1","type":"gauge","value":123}
+	// <html><body><p>gauge m1: 123</p></body></html>
+	// [{"id":"m1","type":"gauge","value":125},{"id":"m2","type":"counter","delta":5}]
+	// <html><body><p>gauge m1: 125</p><p>counter m2: 5</p></body></html>
+}
+
+func initMockRepoForExample() repository.Repository {
+	ctrl := gomock.NewController(&testR{})
+	defer ctrl.Finish()
+
+	repoMock := mocks.NewMockRepository(ctrl)
+
+	mockV := 123.0
+	mockV2 := 125.0
+	mockD := int64(5)
+
+	repoMock.
+		EXPECT().
+		Get(gomock.Any(), "gaugem1").
+		MaxTimes(1).
+		Return(models.Metrics{}, repository.ErrNotFound)
+
+	repoMock.
+		EXPECT().
+		Set(gomock.Any(), models.Metrics{ID: "m1", MType: "gauge", Value: &mockV}).
+		Return(nil)
+
+	repoMock.
+		EXPECT().
+		All(gomock.Any()).
+		Return(
+			func(yield func(models.Metrics) bool) {
+				for _, v := range []models.Metrics{models.Metrics{ID: "m1", MType: "gauge", Value: &mockV}} {
+					if !yield(v) {
+						return
+					}
+				}
+			},
+			nil,
+		)
+	repoMock.
+		EXPECT().
+		Get(gomock.Any(), "gaugem1").
+		MaxTimes(1).
+		Return(models.Metrics{ID: "m1", MType: "gauge", Value: &mockV}, nil)
+
+	repoMock.
+		EXPECT().
+		Get(gomock.Any(), "counterm2").
+		MaxTimes(1).
+		Return(models.Metrics{}, repository.ErrNotFound)
+
+	repoMock.
+		EXPECT().
+		BulkSet(gomock.Any(), gomock.Any()).
+		Return(nil)
+	repoMock.
+		EXPECT().
+		All(gomock.Any()).
+		Return(
+			func(yield func(models.Metrics) bool) {
+				for _, v := range []models.Metrics{models.Metrics{ID: "m1", MType: "gauge", Value: &mockV2}, models.Metrics{ID: "m2", MType: "counter", Delta: &mockD}} {
+					if !yield(v) {
+						return
+					}
+				}
+			},
+			nil,
+		)
+
+	return repoMock
 }

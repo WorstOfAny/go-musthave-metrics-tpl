@@ -19,11 +19,15 @@ import (
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
 )
 
+// Client обёртка для resty.Client
 type Client struct {
 	client     *resty.Client
 	bufferPool *sync.Pool
 }
 
+// NewClient конструктор для Client, возвращает указатель на объект типа Client
+// baseURL - адрес сервера, куда будут отправляться запросы
+// key - secret key, которым будет осуществляться подпись данных
 func NewClient(baseURL string, key string) *Client {
 	restyC := resty.New()
 	restyC.
@@ -74,6 +78,7 @@ func NewClient(baseURL string, key string) *Client {
 	return cl
 }
 
+// Post отправка запроса на эндпоинт action с телом body
 func (c *Client) Post(action string, body []byte) error {
 	cbody := c.bufferPool.Get().(*bytes.Buffer)
 	gw, err := gzip.NewWriterLevel(cbody, gzip.BestCompression)

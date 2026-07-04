@@ -9,6 +9,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
 )
@@ -22,6 +24,7 @@ type agent struct {
 	mu          sync.Mutex
 }
 
+// NewAgent конструктор для агента, возвращает указатель на объект типа agent
 func NewAgent(client *client.Client, stats *stats.Stats, ratelimit int, reportInterval int, pollInterval int) *agent {
 	return &agent{
 		stats:       stats,
@@ -32,6 +35,7 @@ func NewAgent(client *client.Client, stats *stats.Stats, ratelimit int, reportIn
 	}
 }
 
+// Start запуск воркеров на обновление метрик и отправку их
 func (a *agent) Start(ctx context.Context) error {
 	g, errGrCtx := errgroup.WithContext(ctx)
 	reportJobs := jobsGenerator(errGrCtx, a.reportMetrics, a.reportDelay)
@@ -44,7 +48,7 @@ func (a *agent) Start(ctx context.Context) error {
 	worker(g, updateRTJobs)
 	worker(g, updateVMJobs)
 
-	fmt.Println("Agent working, for exit press Ctrl+C")
+	log.Info().Msg("Agent working")
 
 	if err := g.Wait(); err != nil {
 		return fmt.Errorf("worker error: %w", err)

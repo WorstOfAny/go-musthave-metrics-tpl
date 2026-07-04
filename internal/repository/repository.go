@@ -17,13 +17,15 @@ import (
 	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 )
 
+// Config настройки для репозитория
 type Config struct {
-	StoreInterval   int    `env:"STORE_INTERVAL"`
-	FileStoragePath string `env:"FILE_STORAGE_PATH"`
-	RestoreStorage  bool   `env:"RESTORE"`
-	DatabaseDSN     string `env:"DATABASE_DSN"`
+	StoreInterval   int    `env:"STORE_INTERVAL"`    // время обновления файлового хранилища
+	FileStoragePath string `env:"FILE_STORAGE_PATH"` // путь к файловому хранилищу
+	RestoreStorage  bool   `env:"RESTORE"`           // нужно ли восстанавливать хранилище из файла при запуске приложения
+	DatabaseDSN     string `env:"DATABASE_DSN"`      // адрес БД
 }
 
+// Repository интерфейс для файлового хранилища и обертки БД
 type Repository interface {
 	Set(context.Context, models.Metrics) error
 	BulkSet(context.Context, []models.Metrics) error
@@ -39,8 +41,11 @@ func (re repositoryError) Error() string {
 	return string(re)
 }
 
+// ErrNotFound ошибка, возвращаемая, если метрика не найдена в репозитории
 const ErrNotFound = repositoryError("metric not found")
 
+// NewRepository конструктор, возвращающий интерфейс для работы с хранилищем
+// в зависимости от настроек, будет возвращаться либо repository.storage, либо repository.dbDecorator
 func NewRepository(ctx context.Context, cfg Config) (Repository, error) {
 
 	switch {

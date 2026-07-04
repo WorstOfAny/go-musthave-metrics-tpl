@@ -6,6 +6,7 @@ import (
 	"strconv"
 )
 
+// FailReason тип для причины ошибки MetricError, возвращаемая при невозможности создать или обновить объект
 type FailReason string
 
 const (
@@ -18,6 +19,7 @@ const (
 	InvalidInt   FailReason = "Invalid int"
 )
 
+// MetricError тип ошибки, возвращаемый при неудачных операциях с метриками
 type MetricError struct {
 	Reason  FailReason
 	Message string
@@ -28,6 +30,7 @@ func (e *MetricError) Error() string {
 	return e.Message
 }
 
+// Cause причина ошибки
 func (e *MetricError) Cause() FailReason {
 	return e.Reason
 }
@@ -36,12 +39,7 @@ func (e *MetricError) Unwrap() error {
 	return e.Err
 }
 
-// NOTE: Не усложняем пример, вводя иерархическую вложенность структур.
-// Органичиваясь плоской моделью.
-// Delta и Value объявлены через указатели,
-// что бы отличать значение "0", от не заданного значения
-// и соответственно не кодировать в структуру.
-
+// Metrics тип для представления собираемых метрик
 type Metrics struct {
 	ID    string   `json:"id" db:"id"`
 	MType string   `json:"type" db:"mtype"`
@@ -50,6 +48,7 @@ type Metrics struct {
 	Hash  string   `json:"hash,omitempty" db:"hash"`
 }
 
+// NewMetric конструктор для метрики, возвращает указатель на Metrics и ошибку создания
 func NewMetric(mtype string, id string, value string) (*Metrics, error) {
 	m := &Metrics{ID: id, MType: mtype}
 	updErr := m.Update(value)
@@ -65,6 +64,7 @@ func NewMetric(mtype string, id string, value string) (*Metrics, error) {
 	return m, nil
 }
 
+// Valid проверка, что метрика правильная
 func (m *Metrics) Valid() (bool, error) {
 	err := &MetricError{}
 	var ok bool
@@ -97,6 +97,7 @@ func (m *Metrics) Valid() (bool, error) {
 	return ok, nil
 }
 
+// Update обновление метрики согласно её типу
 func (m *Metrics) Update(value string) error {
 	err := &MetricError{}
 	switch m.MType {
@@ -133,6 +134,7 @@ func (m *Metrics) Update(value string) error {
 	return nil
 }
 
+// StringValue текстовое отображение значения метрики
 func (m Metrics) StringValue() (result string) {
 	switch m.MType {
 	case Gauge:
@@ -148,10 +150,12 @@ func (m Metrics) StringValue() (result string) {
 	return result
 }
 
+// String текстовое отображение метрики
 func (m Metrics) String() string {
 	return fmt.Sprintf("%s %s: %s", m.MType, m.ID, m.StringValue())
 }
 
+// Key уникальный идентификатор метрики
 func (m Metrics) Key() string {
 	return m.MType + m.ID
 }

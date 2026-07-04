@@ -1,23 +1,25 @@
 package handler
 
-import(
+import (
+	"context"
+	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
-	"testing"
 	"strings"
-	"io"
-	"github.com/stretchr/testify/assert"
+	"testing"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+	"github.com/stretchr/testify/assert"
+
+	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
-	"math"
-	"context"
 )
 
 type want struct {
-	code int
+	code        int
 	contentType string
-	body string
+	body        string
 }
 
 type bodyCase struct {
@@ -27,33 +29,32 @@ type bodyCase struct {
 }
 
 type pathCase struct {
-	name string
-	path string
+	name      string
+	path      string
 	bodyCases []bodyCase
 }
 
 type methodCase struct {
-	name string
-	method string
+	name      string
+	method    string
 	pathCases []pathCase
 }
 
 type requestCase struct {
-	name string
+	name        string
 	contentType string
-	body string
+	body        string
 	methodCases []methodCase
 }
 
-
 func TestListAll(t *testing.T) {
-	testCases := []requestCase {
+	testCases := []requestCase{
 		requestCase{
-			name: "Content-Type: text_plain",
+			name:        "Content-Type: text_plain",
 			contentType: "text/plain",
 			methodCases: []methodCase{
 				methodCase{
-					name: "Method: GET",
+					name:   "Method: GET",
 					method: http.MethodGet,
 					pathCases: []pathCase{
 						pathCase{
@@ -62,7 +63,7 @@ func TestListAll(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusOK, contentType: "text/html", body: "<html><body><p>gauge MyGauge: 1.1</p></body></html>" },
+									want: want{code: http.StatusOK, contentType: "text/html", body: "<html><body><p>gauge MyGauge: 1.1</p></body></html>"},
 								},
 							},
 						},
@@ -71,11 +72,11 @@ func TestListAll(t *testing.T) {
 			},
 		},
 		requestCase{
-			name: "Content-Type: my_content",
+			name:        "Content-Type: my_content",
 			contentType: "my/content",
 			methodCases: []methodCase{
 				methodCase{
-					name: "Method: GET",
+					name:   "Method: GET",
 					method: http.MethodGet,
 					pathCases: []pathCase{
 						pathCase{
@@ -84,7 +85,7 @@ func TestListAll(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "Any",
-									want: want{ code: http.StatusUnsupportedMediaType, contentType: "text/plain", body: "" },
+									want: want{code: http.StatusUnsupportedMediaType, contentType: "text/plain", body: ""},
 								},
 							},
 						},
@@ -97,20 +98,20 @@ func TestListAll(t *testing.T) {
 	val := 1.1
 
 	mcs := []models.Metrics{
-		models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val},
+		models.Metrics{ID: "MyGauge", MType: models.Gauge, Value: &val},
 	}
 
 	runCases(t, testCases, mcs)
 }
 
 func TestShowTextPlain(t *testing.T) {
-	testCases := []requestCase {
+	testCases := []requestCase{
 		requestCase{
-			name: "Content-Type: text_plain",
+			name:        "Content-Type: text_plain",
 			contentType: "text/plain",
 			methodCases: []methodCase{
 				methodCase{
-					name: "Method: GET",
+					name:   "Method: GET",
 					method: http.MethodGet,
 					pathCases: []pathCase{
 						pathCase{
@@ -119,7 +120,7 @@ func TestShowTextPlain(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusOK, contentType: "text/plain", body: "1.1" },
+									want: want{code: http.StatusOK, contentType: "text/plain", body: "1.1"},
 								},
 							},
 						},
@@ -129,7 +130,7 @@ func TestShowTextPlain(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusNotFound, contentType: "text/plain", body: "" },
+									want: want{code: http.StatusNotFound, contentType: "text/plain", body: ""},
 								},
 							},
 						},
@@ -139,7 +140,7 @@ func TestShowTextPlain(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusNotFound, contentType: "text/plain", body: "" },
+									want: want{code: http.StatusNotFound, contentType: "text/plain", body: ""},
 								},
 							},
 						},
@@ -152,20 +153,20 @@ func TestShowTextPlain(t *testing.T) {
 	val := 1.1
 
 	mcs := []models.Metrics{
-		models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &val},
+		models.Metrics{ID: "MyGauge", MType: models.Gauge, Value: &val},
 	}
 
 	runCases(t, testCases, mcs)
 }
 
 func TestShowJSON(t *testing.T) {
-	testCases := []requestCase {
+	testCases := []requestCase{
 		requestCase{
-			name: "Content-Type: application_json",
+			name:        "Content-Type: application_json",
 			contentType: "application/json",
 			methodCases: []methodCase{
 				methodCase{
-					name: "Method: POST",
+					name:   "Method: POST",
 					method: http.MethodPost,
 					pathCases: []pathCase{
 						pathCase{
@@ -175,37 +176,37 @@ func TestShowJSON(t *testing.T) {
 								bodyCase{
 									name: "with valid json body get Gauge",
 									body: "{\"id\": \"MyGauge\", \"type\": \"gauge\"}",
-									want: want{ code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.1}" },
+									want: want{code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.1}"},
 								},
 								bodyCase{
 									name: "with valid json body get Counter",
 									body: "{\"id\": \"MyCounter\", \"type\": \"counter\"}",
-									want: want{ code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyCounter\",\"type\":\"counter\",\"delta\":5}" },
+									want: want{code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyCounter\",\"type\":\"counter\",\"delta\":5}"},
 								},
 								bodyCase{
 									name: "with valid json body but not existing metric",
 									body: "{\"id\": \"SomeGauge\", \"type\": \"gauge\"}",
-									want: want{ code: http.StatusNotFound, contentType: "application/json", body: "" },
+									want: want{code: http.StatusNotFound, contentType: "application/json", body: ""},
 								},
 								bodyCase{
 									name: "with valid json body and invalid type",
 									body: "{\"id\": \"MyGauge\", \"type\": \"MyType\"}",
-									want: want{ code: http.StatusNotFound, contentType: "application/json", body: "" },
+									want: want{code: http.StatusNotFound, contentType: "application/json", body: ""},
 								},
 								bodyCase{
 									name: "with invalid json body",
 									body: "{id: \"MyGauge\", type: \"gauge\"}",
-									want: want{ code: http.StatusBadRequest, contentType: "application/json", body: "" },
+									want: want{code: http.StatusBadRequest, contentType: "application/json", body: ""},
 								},
 								bodyCase{
 									name: "with invalid json body",
 									body: "{id: \"MyGauge\", type: \"gauge\"",
-									want: want{ code: http.StatusBadRequest, contentType: "application/json", body: "" },
+									want: want{code: http.StatusBadRequest, contentType: "application/json", body: ""},
 								},
 								bodyCase{
 									name: "with valid json body, but object can't be serialized",
 									body: "{\"id\": \"BrokenGauge\", \"type\": \"gauge\"}",
-									want: want{ code: http.StatusInternalServerError, contentType: "application/json", body: "" },
+									want: want{code: http.StatusInternalServerError, contentType: "application/json", body: ""},
 								},
 							},
 						},
@@ -220,23 +221,22 @@ func TestShowJSON(t *testing.T) {
 	brokenVal := math.NaN()
 
 	mcs := []models.Metrics{
-		models.Metrics{ID:"MyGauge", MType: models.Gauge, Value: &gaugeVal},
-		models.Metrics{ID:"BrokenGauge", MType: models.Gauge, Value: &brokenVal},
-		models.Metrics{ID:"MyCounter", MType: models.Counter, Delta: &counterVal},
+		models.Metrics{ID: "MyGauge", MType: models.Gauge, Value: &gaugeVal},
+		models.Metrics{ID: "BrokenGauge", MType: models.Gauge, Value: &brokenVal},
+		models.Metrics{ID: "MyCounter", MType: models.Counter, Delta: &counterVal},
 	}
-
 
 	runCases(t, testCases, mcs)
 }
 
 func TestUpdate(t *testing.T) {
-	testCases := []requestCase {
+	testCases := []requestCase{
 		requestCase{
-			name: "Content-Type: text_plain",
+			name:        "Content-Type: text_plain",
 			contentType: "text/plain",
 			methodCases: []methodCase{
 				methodCase{
-					name: "Method: POST",
+					name:   "Method: POST",
 					method: http.MethodPost,
 					pathCases: []pathCase{
 						pathCase{
@@ -245,7 +245,7 @@ func TestUpdate(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusOK, contentType: "text/plain", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.1}"  },
+									want: want{code: http.StatusOK, contentType: "text/plain", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.1}"},
 								},
 							},
 						},
@@ -255,7 +255,7 @@ func TestUpdate(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusOK, contentType: "text/plain", body: "{\"id\":\"newGauge\",\"type\":\"gauge\",\"value\":1.1}" },
+									want: want{code: http.StatusOK, contentType: "text/plain", body: "{\"id\":\"newGauge\",\"type\":\"gauge\",\"value\":1.1}"},
 								},
 							},
 						},
@@ -265,7 +265,7 @@ func TestUpdate(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusBadRequest, contentType: "text/plain", body: "" },
+									want: want{code: http.StatusBadRequest, contentType: "text/plain", body: ""},
 								},
 							},
 						},
@@ -275,7 +275,7 @@ func TestUpdate(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusBadRequest, contentType: "text/plain", body: "" },
+									want: want{code: http.StatusBadRequest, contentType: "text/plain", body: ""},
 								},
 							},
 						},
@@ -285,7 +285,7 @@ func TestUpdate(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusNotFound, contentType: "text/plain", body: "" },
+									want: want{code: http.StatusNotFound, contentType: "text/plain", body: ""},
 								},
 							},
 						},
@@ -295,7 +295,7 @@ func TestUpdate(t *testing.T) {
 							bodyCases: []bodyCase{
 								bodyCase{
 									name: "with empty body",
-									want: want{ code: http.StatusBadRequest, contentType: "text/plain", body: "" },
+									want: want{code: http.StatusBadRequest, contentType: "text/plain", body: ""},
 								},
 							},
 						},
@@ -304,11 +304,11 @@ func TestUpdate(t *testing.T) {
 			},
 		},
 		requestCase{
-			name: "Request application/json",
+			name:        "Request application/json",
 			contentType: "application/json",
 			methodCases: []methodCase{
 				methodCase{
-					name: "method POST",
+					name:   "method POST",
 					method: http.MethodPost,
 					pathCases: []pathCase{
 						pathCase{
@@ -318,17 +318,17 @@ func TestUpdate(t *testing.T) {
 								bodyCase{
 									name: "with valid json body update Gauge",
 									body: "{\"id\": \"MyGauge\", \"type\": \"gauge\", \"value\": 1.4}",
-									want: want{ code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.4}" },
+									want: want{code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyGauge\",\"type\":\"gauge\",\"value\":1.4}"},
 								},
 								bodyCase{
 									name: "with valid json body update Counter",
 									body: "{\"id\": \"MyCounter\", \"type\": \"counter\", \"delta\": 5}",
-									want: want{ code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyCounter\",\"type\":\"counter\",\"delta\":5}" },
+									want: want{code: http.StatusOK, contentType: "application/json", body: "{\"id\":\"MyCounter\",\"type\":\"counter\",\"delta\":5}"},
 								},
 								bodyCase{
 									name: "with invalid json body",
 									body: "{id: \"MyGauge\", type: \"gauge\", \"value\": 1.4",
-									want: want{ code: http.StatusBadRequest, contentType: "application/json", body: "" },
+									want: want{code: http.StatusBadRequest, contentType: "application/json", body: ""},
 								},
 							},
 						},
@@ -337,11 +337,11 @@ func TestUpdate(t *testing.T) {
 			},
 		},
 		requestCase{
-			name: "Content-Type: my_content",
+			name:        "Content-Type: my_content",
 			contentType: "my/content",
 			methodCases: []methodCase{
 				methodCase{
-					name: "Method: POST",
+					name:   "Method: POST",
 					method: http.MethodPost,
 					pathCases: []pathCase{
 						pathCase{
@@ -351,7 +351,7 @@ func TestUpdate(t *testing.T) {
 								bodyCase{
 									name: "with valid json body",
 									body: "{\"id\": \"MyGauge\", \"type\": \"gauge\", \"value\": 1.4}",
-									want: want{ code: http.StatusUnsupportedMediaType, contentType: "", body: "" },
+									want: want{code: http.StatusUnsupportedMediaType, contentType: "", body: ""},
 								},
 							},
 						},
@@ -361,10 +361,9 @@ func TestUpdate(t *testing.T) {
 		},
 	}
 
-
 	mcs := []models.Metrics{
-		models.Metrics{ID:"MyGauge", MType: models.Gauge},
-		models.Metrics{ID:"MyCounter", MType: models.Counter},
+		models.Metrics{ID: "MyGauge", MType: models.Gauge},
+		models.Metrics{ID: "MyCounter", MType: models.Counter},
 	}
 
 	runCases(t, testCases, mcs)
@@ -374,19 +373,22 @@ func TestUpdate(t *testing.T) {
 func runCases(t *testing.T, cases []requestCase, metrics []models.Metrics) {
 	for _, tc := range cases {
 		testConfig := repository.Config{StoreInterval: 10, FileStoragePath: "test_store.json", RestoreStorage: false, DatabaseDSN: ""}
-		errCh := make(chan error, 2)
 		ctx := context.Background()
-		repo, err := repository.NewRepository(ctx, errCh, testConfig)
+		repo, err := repository.NewRepository(ctx, testConfig)
 
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		c := NewMetricsController(repo, "")
-		for _, v := range metrics { c.storage.Set(ctx, v) }
+		c := NewMetricsController(ctx, repo, "")
+		for _, v := range metrics {
+			c.storage.Set(ctx, v)
+		}
 		mux := chi.NewRouter()
 		c.ApplyTo(mux)
 		t.Run(tc.name, func(t *testing.T) {
 			for _, mtc := range tc.methodCases {
-				t.Run(mtc.name, func(t *testing.T){
+				t.Run(mtc.name, func(t *testing.T) {
 					for _, ptc := range mtc.pathCases {
 						t.Run(ptc.name, func(t *testing.T) {
 							for _, btc := range ptc.bodyCases {

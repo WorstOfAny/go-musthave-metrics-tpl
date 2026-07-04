@@ -1,93 +1,95 @@
 package stats
 
-import(
-	"runtime"
-	"math/rand"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
-	"iter"
-	"sync"
+import (
 	"encoding/json"
-	mem "github.com/shirou/gopsutil/v4/mem"
-	cpu "github.com/shirou/gopsutil/v4/cpu"
 	"fmt"
+	"iter"
+	"math/rand"
+	"runtime"
 	"slices"
-	"strings"
 	"strconv"
+	"strings"
+	"sync"
+
+	cpu "github.com/shirou/gopsutil/v4/cpu"
+	mem "github.com/shirou/gopsutil/v4/mem"
+
+	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 )
 
 type Stats struct {
 	memstats *runtime.MemStats
-	metrics []models.Metrics
-	mu sync.Mutex
+	metrics  []models.Metrics
+	mu       sync.Mutex
 
-	Alloc *float64
-	BuckHashSys *float64
-	Frees *float64
-	GCCPUFraction *float64
-	GCSys *float64
-	HeapAlloc *float64
-	HeapIdle *float64
-	HeapInuse *float64
-	HeapObjects *float64
-	HeapReleased *float64
-	HeapSys *float64
-	LastGC *float64
-	Lookups *float64
-	MCacheInuse *float64
-	MCacheSys *float64
-	MSpanInuse *float64
-	MSpanSys *float64
-	Mallocs *float64
-	NextGC *float64
-	NumForcedGC *float64
-	NumGC *float64
-	OtherSys *float64
-	PauseTotalNs *float64
-	StackInuse *float64
-	StackSys *float64
-	Sys *float64
-	TotalAlloc *float64
-	RandomValue *float64
-	PollCount *int64
-	TotalMemory *float64
-	FreeMemory *float64
+	Alloc           *float64
+	BuckHashSys     *float64
+	Frees           *float64
+	GCCPUFraction   *float64
+	GCSys           *float64
+	HeapAlloc       *float64
+	HeapIdle        *float64
+	HeapInuse       *float64
+	HeapObjects     *float64
+	HeapReleased    *float64
+	HeapSys         *float64
+	LastGC          *float64
+	Lookups         *float64
+	MCacheInuse     *float64
+	MCacheSys       *float64
+	MSpanInuse      *float64
+	MSpanSys        *float64
+	Mallocs         *float64
+	NextGC          *float64
+	NumForcedGC     *float64
+	NumGC           *float64
+	OtherSys        *float64
+	PauseTotalNs    *float64
+	StackInuse      *float64
+	StackSys        *float64
+	Sys             *float64
+	TotalAlloc      *float64
+	RandomValue     *float64
+	PollCount       *int64
+	TotalMemory     *float64
+	FreeMemory      *float64
 	CPUutilization1 *float64
 }
 
-func NewStats() (*Stats) {
+func NewStats() *Stats {
 	stats := &Stats{
-		memstats: &runtime.MemStats{},
-		Alloc: new(float64),
-		BuckHashSys: new(float64),
-		Frees: new(float64),
-		GCCPUFraction: new(float64),
-		GCSys: new(float64),
-		HeapAlloc: new(float64),
-		HeapIdle: new(float64),
-		HeapInuse: new(float64),
-		HeapObjects: new(float64),
-		HeapReleased: new(float64),
-		HeapSys: new(float64),
-		LastGC: new(float64),
-		Lookups: new(float64),
-		MCacheInuse: new(float64),
-		MCacheSys: new(float64),
-		MSpanInuse: new(float64),
-		MSpanSys: new(float64),
-		Mallocs: new(float64),
-		NextGC: new(float64),
-		NumForcedGC: new(float64),
-		NumGC: new(float64),
-		OtherSys: new(float64),
-		PauseTotalNs: new(float64),
-		StackInuse: new(float64),
-		StackSys: new(float64),
-		Sys: new(float64),
-		TotalAlloc: new(float64),
-		RandomValue: new(float64),
-		PollCount: new(int64),
-		TotalMemory: new(float64),
-		FreeMemory: new(float64),
+		memstats:        &runtime.MemStats{},
+		Alloc:           new(float64),
+		BuckHashSys:     new(float64),
+		Frees:           new(float64),
+		GCCPUFraction:   new(float64),
+		GCSys:           new(float64),
+		HeapAlloc:       new(float64),
+		HeapIdle:        new(float64),
+		HeapInuse:       new(float64),
+		HeapObjects:     new(float64),
+		HeapReleased:    new(float64),
+		HeapSys:         new(float64),
+		LastGC:          new(float64),
+		Lookups:         new(float64),
+		MCacheInuse:     new(float64),
+		MCacheSys:       new(float64),
+		MSpanInuse:      new(float64),
+		MSpanSys:        new(float64),
+		Mallocs:         new(float64),
+		NextGC:          new(float64),
+		NumForcedGC:     new(float64),
+		NumGC:           new(float64),
+		OtherSys:        new(float64),
+		PauseTotalNs:    new(float64),
+		StackInuse:      new(float64),
+		StackSys:        new(float64),
+		Sys:             new(float64),
+		TotalAlloc:      new(float64),
+		RandomValue:     new(float64),
+		PollCount:       new(int64),
+		TotalMemory:     new(float64),
+		FreeMemory:      new(float64),
 		CPUutilization1: new(float64),
 	}
 
@@ -128,15 +130,17 @@ func NewStats() (*Stats) {
 	return stats
 }
 
-func(s *Stats) AllMetrics() iter.Seq[*models.Metrics] {
+func (s *Stats) AllMetrics() iter.Seq[*models.Metrics] {
 	return func(yield func(*models.Metrics) bool) {
 		for _, v := range s.metrics {
-			if !yield(&v) { return }
+			if !yield(&v) {
+				return
+			}
 		}
 	}
 }
 
-func(s *Stats) UpdateVM() error {
+func (s *Stats) UpdateVM() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -162,7 +166,7 @@ func(s *Stats) UpdateVM() error {
 	return nil
 }
 
-func(s *Stats) UpdateRT() error {
+func (s *Stats) UpdateRT() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	runtime.ReadMemStats(s.memstats)
@@ -206,7 +210,9 @@ func (s *Stats) MarshalJSON() ([]byte, error) {
 	defer s.mu.Unlock()
 	res, err := json.Marshal(s.metrics)
 
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	return res, nil
 }

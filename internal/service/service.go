@@ -1,11 +1,11 @@
 package service
 
-import(
-	"crypto/sha256"
+import (
 	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"errors"
+	"fmt"
 )
 
 var ErrHMACNotEqual = errors.New("hmacs not equal")

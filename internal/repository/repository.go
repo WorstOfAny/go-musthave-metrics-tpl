@@ -6,10 +6,10 @@ import(
 	"os"
 	"iter"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
-
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/migrations"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	pgxpool "github.com/jackc/pgx/v5/pgxpool"
 	"fmt"
 	"errors"
@@ -39,11 +39,12 @@ func(re repositoryError) Error() string {
 
 const ErrNotFound = repositoryError("metric not found")
 
-func NewRepository(ctx context.Context, errCh chan error, cfg Config) (Repository, error) {
+func NewRepository(ctx context.Context, cfg Config) (Repository, error) {
 
 	switch {
 		case cfg.DatabaseDSN != "":
-			m, err := migrate.New( "file://./migrations/", cfg.DatabaseDSN, )
+			sourceDriver, err := iofs.New(migrations.MigrationsFS, "migrations")
+			m, err := migrate.NewWithSourceInstance("iofs", sourceDriver, cfg.DatabaseDSN)
 			if err != nil {
 				return nil, fmt.Errorf("failed initialize migrations: %w", err)
 			}
@@ -78,7 +79,7 @@ func NewRepository(ctx context.Context, errCh chan error, cfg Config) (Repositor
 			if err != nil {
 				return nil, fmt.Errorf("failed to initialize mem storage: %w", err)
 			}
-			go repo.WriteToFile(ctx, errCh, time.Duration(cfg.StoreInterval) * time.Second)
+			go repo.WriteToFile(ctx, time.Duration(cfg.StoreInterval) * time.Second)
 			return repo, nil
 		default:
 			repo, err := NewStorage(nil, false)

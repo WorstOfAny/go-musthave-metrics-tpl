@@ -49,6 +49,7 @@ func (dbd *dbDecorator) Set(ctx context.Context, obj models.Metrics) error {
 	if err != nil {
 		return fmt.Errorf("failed to save object to repository: %w", err)
 	}
+
 	return nil
 }
 
@@ -187,3 +188,4 @@ func retry(request func() (any, error), maxRetries int) (any, error) {
 
 	return nil, errors.New("db unreachable")
 }
+

@@ -4,10 +4,12 @@ import(
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/observers"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 	pgconn "github.com/jackc/pgconn"
 	"net/http"
+	"net/http/pprof"
 	"strings"
 	"context"
 	"fmt"
@@ -25,11 +27,49 @@ import(
 
 type metricsController struct {
 	storage repository.Repository
+	observers []observers.Observer
+	metricsEventCh chan observers.Event
 	key string
 }
 
-func NewMetricsController(storage repository.Repository, key string) *metricsController {
-	return &metricsController{storage: storage, key: key}
+type MetricsEvent struct {
+	metrics []string
+	ts time.Time
+	ip_addr string
+}
+
+func NewMetricsController(ctx context.Context, storage repository.Repository, key string) *metricsController {
+	controller := &metricsController{storage: storage, key: key, metricsEventCh: make(chan observers.Event)}
+
+	go func() {
+		for {
+			select {
+				case <-ctx.Done():
+					close(controller.metricsEventCh)
+					return
+				case event := <-controller.metricsEventCh:
+					go func(e observers.Event) {
+						for _, obs := range controller.observers {
+							obs.Update(e)
+						}
+					}(event)
+			}
+		}
+	}()
+
+	return controller
+}
+
+func (c *metricsController) Register(o observers.Observer) {
+	c.observers = append(c.observers, o)
+}
+
+func (c *metricsController) newEvent(metrics []models.Metrics, ip_addr string) {
+	metricIDs := make([]string, len(metrics))
+	for i, m := range metrics {
+		metricIDs[i] = m.ID
+	}
+	c.metricsEventCh <- observers.Event{Metrics: metricIDs, TS: time.Now(), IPAddr: ip_addr}
 }
 
 type responseData struct {
@@ -78,6 +118,14 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 	mux.Use(recoveryPanic, c.checkHMAC, decodeRequest, c.logRequest)
 	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)
 	mux.With(textPlainTypeSet).Get("/ping", c.ping)
+	mux.Route("/debug/", func(r chi.Router) {
+		r.HandleFunc("/pprof", pprof.Index)
+		r.HandleFunc("/cmdline", pprof.Cmdline)
+		r.HandleFunc("/profile", pprof.Profile)
+		r.HandleFunc("/symbol", pprof.Symbol)
+		r.HandleFunc("/trace", pprof.Trace)
+		r.HandleFunc("/*", http.HandlerFunc(pprof.Index))
+	})
 
 	mux.Route("/value", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.showJSON)
@@ -348,8 +396,8 @@ func jsonTypeCheck(next http.Handler) http.Handler {
 
 func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	var body string
-	body += "<html><body>"
+	var body bytes.Buffer
+	body.WriteString("<html><body>")
 	objs, err := c.storage.All(r.Context())
 	if err != nil {
 		log.Debug().Err(err).Msg("failed to fetch metrics from db")
@@ -357,10 +405,10 @@ func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for v := range objs {
-		body += fmt.Sprintf("<p>%s</p>", v.String())
+		fmt.Fprintf(&body, "<p>%s</p>", v.String())
 	}
-	body += "</body></html>"
-	w.Write([]byte(body))
+	body.WriteString("</body></html>")
+	w.Write(body.Bytes())
 }
 
 func (c *metricsController) showJSON(w http.ResponseWriter, r *http.Request) {
@@ -444,6 +492,7 @@ func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write(response)
+	go c.newEvent([]models.Metrics{metric}, r.RemoteAddr)
 }
 
 func (c *metricsController) updates(w http.ResponseWriter, r *http.Request) {
@@ -504,6 +553,7 @@ func (c *metricsController) updates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write(response)
+	go c.newEvent(metrics, r.RemoteAddr)
 }
 
 func (c *metricsController) ping(w http.ResponseWriter, r *http.Request) {

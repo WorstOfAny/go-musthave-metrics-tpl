@@ -374,13 +374,12 @@ func TestUpdate(t *testing.T) {
 func runCases(t *testing.T, cases []requestCase, metrics []models.Metrics) {
 	for _, tc := range cases {
 		testConfig := repository.Config{StoreInterval: 10, FileStoragePath: "test_store.json", RestoreStorage: false, DatabaseDSN: ""}
-		errCh := make(chan error, 2)
 		ctx := context.Background()
-		repo, err := repository.NewRepository(ctx, errCh, testConfig)
+		repo, err := repository.NewRepository(ctx, testConfig)
 
 		if err != nil { t.Fatal(err) }
 
-		c := NewMetricsController(repo, "")
+		c := NewMetricsController(ctx, repo, "")
 		for _, v := range metrics { c.storage.Set(ctx, v) }
 		mux := chi.NewRouter()
 		c.ApplyTo(mux)

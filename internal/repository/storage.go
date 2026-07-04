@@ -76,7 +76,7 @@ func (s *memStorage) All(ctx context.Context) (iter.Seq[models.Metrics], error) 
 	}, nil
 }
 
-func (s *memStorage) WriteToFile(ctx context.Context, errCh chan error, delay time.Duration) {
+func (s *memStorage) WriteToFile(ctx context.Context, delay time.Duration) {
 	writer := bufio.NewWriter(s.storageFile)
 
 	for {
@@ -87,14 +87,12 @@ func (s *memStorage) WriteToFile(ctx context.Context, errCh chan error, delay ti
 				err := s.storageFile.Truncate(0)
 				if err != nil {
 					log.Debug().Err(err).Msg("file truncate err")
-					errCh <- fmt.Errorf("failed to truncate storage file: %w", err)
 					return
 				}
 
 				_, err = s.storageFile.Seek(0, io.SeekStart)
 				if err != nil {
 					log.Debug().Err(err).Msg("file seek err")
-					errCh <- fmt.Errorf("failed to seek storage file: %w", err)
 					return
 				}
 
@@ -102,7 +100,6 @@ func (s *memStorage) WriteToFile(ctx context.Context, errCh chan error, delay ti
 
 				if err != nil {
 					log.Debug().Err(err).Msg("failed fetch metrics")
-					errCh <- fmt.Errorf("failed to marshal metric: %w", err)
 					return
 				}
 
@@ -110,21 +107,18 @@ func (s *memStorage) WriteToFile(ctx context.Context, errCh chan error, delay ti
 					data, err := json.Marshal(item)
 					if err != nil {
 						log.Debug().Err(err).Str("itemKey", item.Key()).Msg("marshal item err")
-						errCh <- fmt.Errorf("failed to marshal metric: %w", err)
 						return
 					}
 
 					_, err = writer.Write(data)
 					if err != nil {
 						log.Debug().Err(err).Str("data", string(data)).Msg("write item err")
-						errCh <- fmt.Errorf("failed to write data to buffer: %w", err)
 						return
 					}
 
 					err = writer.WriteByte('\n')
 					if err != nil {
 						log.Debug().Err(err).Msg("write byte err")
-						errCh <- fmt.Errorf("failed to write data to buffer: %w", err)
 						return
 					}
 

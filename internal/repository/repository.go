@@ -39,7 +39,7 @@ func(re repositoryError) Error() string {
 
 const ErrNotFound = repositoryError("metric not found")
 
-func NewRepository(ctx context.Context, errCh chan error, cfg Config) (Repository, error) {
+func NewRepository(ctx context.Context, cfg Config) (Repository, error) {
 
 	switch {
 		case cfg.DatabaseDSN != "":
@@ -78,7 +78,7 @@ func NewRepository(ctx context.Context, errCh chan error, cfg Config) (Repositor
 			if err != nil {
 				return nil, fmt.Errorf("failed to initialize mem storage: %w", err)
 			}
-			go repo.WriteToFile(ctx, errCh, time.Duration(cfg.StoreInterval) * time.Second)
+			go repo.WriteToFile(ctx, time.Duration(cfg.StoreInterval) * time.Second)
 			return repo, nil
 		default:
 			repo, err := NewStorage(nil, false)

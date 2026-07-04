@@ -14,10 +14,12 @@ import(
 	"net/http"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
 	"fmt"
+	"sync"
 )
 
 type Client struct {
 	client *resty.Client
+	bufferPool *sync.Pool
 }
 
 func NewClient(baseURL string, key string) *Client {
@@ -54,12 +56,21 @@ func NewClient(baseURL string, key string) *Client {
 		AddRetryHook(func(r *resty.Response, err error) {
 			if err != nil { log.Debug().Str("attempt", strconv.Itoa(r.Request.Attempt)).Err(err).Msg("Request attempt") }
 		})
-	return &Client{ client: restyC }
+
+	cl := &Client{client: restyC}
+
+	cl.bufferPool = &sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
+
+	return cl
 }
 
 func (c *Client) Post(action string, body []byte) error {
-	var cbody bytes.Buffer
-	gw, err := gzip.NewWriterLevel(&cbody, gzip.BestCompression)
+	cbody := c.bufferPool.Get().(*bytes.Buffer)
+	gw, err := gzip.NewWriterLevel(cbody, gzip.BestCompression)
 	if err != nil { return err }
 
 	gw.Write(body)
@@ -73,6 +84,10 @@ func (c *Client) Post(action string, body []byte) error {
 		SetHeader("Accept-Encoding", "gzip").
 		SetBody(cbody.Bytes()).
 		Post(action)
+
+	cbody.Reset()
+	c.bufferPool.Put(cbody)
+
 
 	if err != nil {
 		log.Debug().Err(err).Msg("request err")

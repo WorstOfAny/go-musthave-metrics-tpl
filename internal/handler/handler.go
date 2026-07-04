@@ -9,6 +9,7 @@ import(
 	"github.com/rs/zerolog/log"
 	pgconn "github.com/jackc/pgconn"
 	"net/http"
+	"net/http/pprof"
 	"strings"
 	"context"
 	"fmt"
@@ -117,6 +118,14 @@ func (c *metricsController) ApplyTo(mux chi.Router) {
 	mux.Use(recoveryPanic, c.checkHMAC, decodeRequest, c.logRequest)
 	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)
 	mux.With(textPlainTypeSet).Get("/ping", c.ping)
+	mux.Route("/debug/", func(r chi.Router) {
+		r.HandleFunc("/pprof", pprof.Index)
+		r.HandleFunc("/cmdline", pprof.Cmdline)
+		r.HandleFunc("/profile", pprof.Profile)
+		r.HandleFunc("/symbol", pprof.Symbol)
+		r.HandleFunc("/trace", pprof.Trace)
+		r.HandleFunc("/*", http.HandlerFunc(pprof.Index))
+	})
 
 	mux.Route("/value", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.showJSON)
@@ -387,8 +396,8 @@ func jsonTypeCheck(next http.Handler) http.Handler {
 
 func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	var body string
-	body += "<html><body>"
+	var body bytes.Buffer
+	body.WriteString("<html><body>")
 	objs, err := c.storage.All(r.Context())
 	if err != nil {
 		log.Debug().Err(err).Msg("failed to fetch metrics from db")
@@ -396,10 +405,10 @@ func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for v := range objs {
-		body += fmt.Sprintf("<p>%s</p>", v.String())
+		fmt.Fprintf(&body, "<p>%s</p>", v.String())
 	}
-	body += "</body></html>"
-	w.Write([]byte(body))
+	body.WriteString("</body></html>")
+	w.Write(body.Bytes())
 }
 
 func (c *metricsController) showJSON(w http.ResponseWriter, r *http.Request) {

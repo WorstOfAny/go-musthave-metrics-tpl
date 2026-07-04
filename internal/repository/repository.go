@@ -6,10 +6,10 @@ import(
 	"os"
 	"iter"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
-
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/migrations"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	pgxpool "github.com/jackc/pgx/v5/pgxpool"
 	"fmt"
 	"errors"
@@ -43,7 +43,8 @@ func NewRepository(ctx context.Context, cfg Config) (Repository, error) {
 
 	switch {
 		case cfg.DatabaseDSN != "":
-			m, err := migrate.New( "file://./migrations/", cfg.DatabaseDSN, )
+			sourceDriver, err := iofs.New(migrations.MigrationsFS, "migrations")
+			m, err := migrate.NewWithSourceInstance("iofs", sourceDriver, cfg.DatabaseDSN)
 			if err != nil {
 				return nil, fmt.Errorf("failed initialize migrations: %w", err)
 			}

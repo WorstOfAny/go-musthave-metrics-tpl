@@ -397,7 +397,7 @@ func runCases(t *testing.T, cases []requestCase, metrics []models.Metrics) {
 						t.Run(ptc.name, func(t *testing.T) {
 							for _, btc := range ptc.bodyCases {
 								t.Run(btc.name, func(t *testing.T) {
-									r := httptest.NewRequest(mtc.method, ptc.path, strings.NewReader(btc.body))
+									r := httptest.NewRequestWithContext(ctx, mtc.method, ptc.path, strings.NewReader(btc.body))
 									r.Header.Set("Content-Type", tc.contentType)
 									w := httptest.NewRecorder()
 									mux.ServeHTTP(w, r)
@@ -435,7 +435,7 @@ func Example() {
 	r := chi.NewRouter()
 	c.ApplyTo(r)
 
-	req := httptest.NewRequest(http.MethodPost, "/update", strings.NewReader(`{"id": "m1", "type": "gauge", "value": 123.0}`))
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/update", strings.NewReader(`{"id": "m1", "type": "gauge", "value": 123.0}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -443,14 +443,14 @@ func Example() {
 	os.Stdout.Write(rec.Body.Bytes())
 	os.Stdout.Write([]byte("\n"))
 
-	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req = httptest.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
 	os.Stdout.Write(rec.Body.Bytes())
 	os.Stdout.Write([]byte("\n"))
 
-	req = httptest.NewRequest(http.MethodPost, "/updates", strings.NewReader(`[{"id": "m1", "type": "gauge", "value": 125.0}, {"id": "m2", "delta": 5, "type": "counter"}]`))
+	req = httptest.NewRequestWithContext(ctx, http.MethodPost, "/updates", strings.NewReader(`[{"id": "m1", "type": "gauge", "value": 125.0}, {"id": "m2", "delta": 5, "type": "counter"}]`))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -458,7 +458,7 @@ func Example() {
 	os.Stdout.Write(rec.Body.Bytes())
 	os.Stdout.Write([]byte("\n"))
 
-	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req = httptest.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 

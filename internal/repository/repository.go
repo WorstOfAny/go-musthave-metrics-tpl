@@ -51,6 +51,9 @@ func NewRepository(ctx context.Context, cfg Config) (Repository, error) {
 	switch {
 	case cfg.DatabaseDSN != "":
 		sourceDriver, err := iofs.New(migrations.MigrationsFS, "migrations")
+		if err != nil {
+			return nil, fmt.Errorf("failed initialize source driver for migrations: %w", err)
+		}
 		m, err := migrate.NewWithSourceInstance("iofs", sourceDriver, cfg.DatabaseDSN)
 		if err != nil {
 			return nil, fmt.Errorf("failed initialize migrations: %w", err)

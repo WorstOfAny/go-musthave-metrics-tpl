@@ -1,7 +1,8 @@
 package models
 
-import(
+import (
 	"testing"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -11,27 +12,27 @@ func TestNewMetric(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name string
-		metricID string
-		metricType string
+		name        string
+		metricID    string
+		metricType  string
 		metricValue string
-		want want
+		want        want
 	}{
 		{
-			name: "Test new metric with valid type",
-			metricID: "Test",
-			metricType: Gauge,
+			name:        "Test new metric with valid type",
+			metricID:    "Test",
+			metricType:  Gauge,
 			metricValue: "2.3",
-			want: want {
-				returnValue: &Metrics{ID: "Test", MType: Gauge, Value: new(float64(2.3)) },
+			want: want{
+				returnValue: &Metrics{ID: "Test", MType: Gauge, Value: new(float64(2.3))},
 			},
 		},
 		{
-			name: "Test new metric with invalid type",
-			metricID: "Test2",
-			metricType: "myType",
+			name:        "Test new metric with invalid type",
+			metricID:    "Test2",
+			metricType:  "myType",
 			metricValue: "0",
-			want: want {
+			want: want{
 				returnValue: nil,
 			},
 		},
@@ -60,80 +61,80 @@ func TestUpdate(t *testing.T) {
 	badMetric := Metrics{ID: "Test7", MType: "MyType"}
 
 	type want struct {
-		metricValue any
+		metricValue    any
 		pointerChanged bool
-		returnError bool
+		returnError    bool
 	}
 
 	testCases := []struct {
-		name string
-		metric *Metrics
+		name     string
+		metric   *Metrics
 		newValue string
-		want want
+		want     want
 	}{
 		{
-			name: "Test update gauge metric with undefined value",
-			metric: &gaugeMetric1,
+			name:     "Test update gauge metric with undefined value",
+			metric:   &gaugeMetric1,
 			newValue: "5.0",
-			want: want {
-				metricValue: float64(5.0),
+			want: want{
+				metricValue:    float64(5.0),
 				pointerChanged: true,
 			},
 		},
 		{
-			name: "Test update gauge metric with defined value",
-			metric: &gaugeMetric2,
+			name:     "Test update gauge metric with defined value",
+			metric:   &gaugeMetric2,
 			newValue: "5.0",
-			want: want {
-				metricValue: float64(5.0),
+			want: want{
+				metricValue:    float64(5.0),
 				pointerChanged: false,
 			},
 		},
 		{
-			name: "Test update gauge metric with invalid value",
-			metric: &gaugeMetric1,
+			name:     "Test update gauge metric with invalid value",
+			metric:   &gaugeMetric1,
 			newValue: "TEST",
-			want: want {
-				metricValue: float64(5.0),
+			want: want{
+				metricValue:    float64(5.0),
 				pointerChanged: false,
-				returnError: true,
+				returnError:    true,
 			},
 		},
 		{
-			name: "Test update counter metric with undefined value",
-			metric: &counterMetric1,
+			name:     "Test update counter metric with undefined value",
+			metric:   &counterMetric1,
 			newValue: "5",
-			want: want {
-				metricValue: int64(5),
+			want: want{
+				metricValue:    int64(5),
 				pointerChanged: true,
 			},
 		},
 		{
-			name: "Test update counter metric with defined value",
-			metric: &counterMetric2,
+			name:     "Test update counter metric with defined value",
+			metric:   &counterMetric2,
 			newValue: "5",
-			want: want {
-				metricValue: int64(5),
+			want: want{
+				metricValue:    int64(5),
 				pointerChanged: false,
 			},
 		},
 		{
-			name: "Test update counter metric with invalid value",
-			metric: &counterMetric1,
+			name:     "Test update counter metric with invalid value",
+			metric:   &counterMetric1,
 			newValue: "5.8",
-			want: want {
-				metricValue: int64(5),
+			want: want{
+				metricValue:    int64(5),
 				pointerChanged: false,
-				returnError: true,
+				returnError:    true,
 			},
 		},
 		{
-			name: "Test update MyType metric value",
-			metric: &badMetric,
+			name:     "Test update MyType metric value",
+			metric:   &badMetric,
 			newValue: "5",
-			want: want {
+			want: want{
 				pointerChanged: false,
-				returnError: true,
+				returnError:    true,
 			},
 		},
 	}
@@ -200,42 +201,42 @@ func TestStringValue(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name string
+		name   string
 		metric *Metrics
-		want want
+		want   want
 	}{
 		{
-			name: "Test counter string value",
+			name:   "Test counter string value",
 			metric: counterMetric,
-			want: want {
+			want: want{
 				returnValue: "100",
 			},
 		},
 		{
-			name: "Test gauge string value",
+			name:   "Test gauge string value",
 			metric: gaugeMetric,
-			want: want {
+			want: want{
 				returnValue: "112.54621",
 			},
 		},
 		{
-			name: "Test blank string value",
+			name:   "Test blank string value",
 			metric: blankMetric,
-			want: want {
+			want: want{
 				returnValue: "",
 			},
 		},
 		{
-			name: "Test blank counter string value",
+			name:   "Test blank counter string value",
 			metric: blankCounterMetric,
-			want: want {
+			want: want{
 				returnValue: "",
 			},
 		},
 		{
-			name: "Test blank gauge string value",
+			name:   "Test blank gauge string value",
 			metric: blankGaugeMetric,
-			want: want {
+			want: want{
 				returnValue: "",
 			},
 		},

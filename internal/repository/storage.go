@@ -1,60 +1,29 @@
 package repository
 
-import(
-	"iter"
+import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"iter"
+	"maps"
 	"os"
 	"sync"
 	"time"
-	"context"
+
 	"github.com/rs/zerolog/log"
-	"maps"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
-	"fmt"
+
+	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 )
 
 type memStorage struct {
 	storageFile *os.File
-	mu sync.Mutex
-	ds map[string]models.Metrics
+	mu          sync.Mutex
+	ds          map[string]models.Metrics
 }
 
-func (s *memStorage) Set(ctx context.Context, v models.Metrics) error {
-	s.mu.Lock()
-	s.ds[v.Key()] = v
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *memStorage) BulkSet(ctx context.Context, vs []models.Metrics) error {
-	s.mu.Lock()
-
-	iterVs := func(yield func(string, models.Metrics) bool) {
-		for _, v := range vs { if !yield(v.Key(), v) { return } }
-	}
-	maps.Insert(s.ds, iterVs)
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *memStorage) Get(ctx context.Context, k string) (models.Metrics, error) {
-	var err error
-	s.mu.Lock()
-	value, ok := s.ds[k]
-	s.mu.Unlock()
-	if !ok {
-		err = ErrNotFound
-	}
-	return value, err
-}
-
-func (s *memStorage) Remove(ctx context.Context, k string) error {
-	delete(s.ds, k)
-	return nil
-}
-
+// NewStorage конструктор для файлового хранилища, возвращает memStorage и ошибку
 func NewStorage(storageFile *os.File, restore bool) (storage *memStorage, err error) {
 	storage = &memStorage{ds: map[string]models.Metrics{}, storageFile: storageFile}
 	if restore {
@@ -68,69 +37,110 @@ func NewStorage(storageFile *os.File, restore bool) (storage *memStorage, err er
 	return storage, nil
 }
 
+// Set запись метрики, вернёт ошибку, если что-то пошло не тaк
+func (s *memStorage) Set(ctx context.Context, v models.Metrics) error {
+	s.mu.Lock()
+	s.ds[v.Key()] = v
+	s.mu.Unlock()
+	return nil
+}
+
+// BulkSet массовая запись метрик, вернёт ошибку, если что-то пойдёт не так
+func (s *memStorage) BulkSet(ctx context.Context, vs []models.Metrics) error {
+	s.mu.Lock()
+
+	iterVs := func(yield func(string, models.Metrics) bool) {
+		for _, v := range vs {
+			if !yield(v.Key(), v) {
+				return
+			}
+		}
+	}
+	maps.Insert(s.ds, iterVs)
+	s.mu.Unlock()
+	return nil
+}
+
+// Get получение метрики по ключу, вернёт объект models.Metrics и ошибку
+func (s *memStorage) Get(ctx context.Context, k string) (models.Metrics, error) {
+	var err error
+	s.mu.Lock()
+	value, ok := s.ds[k]
+	s.mu.Unlock()
+	if !ok {
+		err = ErrNotFound
+	}
+	return value, err
+}
+
+// Remove удаление метрики по ключу
+func (s *memStorage) Remove(ctx context.Context, k string) error {
+	delete(s.ds, k)
+	return nil
+}
+
+// All получение итератора по всем хранимым метрикам, вернёт ошибку, если что-то пойдёт не так
 func (s *memStorage) All(ctx context.Context) (iter.Seq[models.Metrics], error) {
 	return func(yield func(models.Metrics) bool) {
 		for _, v := range s.ds {
-			if !yield(v) { return }
+			if !yield(v) {
+				return
+			}
 		}
 	}, nil
 }
 
-func (s *memStorage) WriteToFile(ctx context.Context, errCh chan error, delay time.Duration) {
+// WriteToFile запись в файл, перед записью файл очищается
+func (s *memStorage) WriteToFile(ctx context.Context, delay time.Duration) {
 	writer := bufio.NewWriter(s.storageFile)
 
 	for {
 		select {
-			case <-ctx.Done(): return
-			case <-time.After(delay):
-				s.mu.Lock()
-				err := s.storageFile.Truncate(0)
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+			s.mu.Lock()
+			err := s.storageFile.Truncate(0)
+			if err != nil {
+				log.Debug().Err(err).Msg("file truncate err")
+				return
+			}
+
+			_, err = s.storageFile.Seek(0, io.SeekStart)
+			if err != nil {
+				log.Debug().Err(err).Msg("file seek err")
+				return
+			}
+
+			items, err := s.All(ctx)
+
+			if err != nil {
+				log.Debug().Err(err).Msg("failed fetch metrics")
+				return
+			}
+
+			for item := range items {
+				data, err := json.Marshal(item)
 				if err != nil {
-					log.Debug().Err(err).Msg("file truncate err")
-					errCh <- fmt.Errorf("failed to truncate storage file: %w", err)
+					log.Debug().Err(err).Str("itemKey", item.Key()).Msg("marshal item err")
 					return
 				}
 
-				_, err = s.storageFile.Seek(0, io.SeekStart)
+				_, err = writer.Write(data)
 				if err != nil {
-					log.Debug().Err(err).Msg("file seek err")
-					errCh <- fmt.Errorf("failed to seek storage file: %w", err)
+					log.Debug().Err(err).Str("data", string(data)).Msg("write item err")
 					return
 				}
 
-				items, err := s.All(ctx)
-
+				err = writer.WriteByte('\n')
 				if err != nil {
-					log.Debug().Err(err).Msg("failed fetch metrics")
-					errCh <- fmt.Errorf("failed to marshal metric: %w", err)
+					log.Debug().Err(err).Msg("write byte err")
 					return
 				}
 
-				for item := range items {
-					data, err := json.Marshal(item)
-					if err != nil {
-						log.Debug().Err(err).Str("itemKey", item.Key()).Msg("marshal item err")
-						errCh <- fmt.Errorf("failed to marshal metric: %w", err)
-						return
-					}
-
-					_, err = writer.Write(data)
-					if err != nil {
-						log.Debug().Err(err).Str("data", string(data)).Msg("write item err")
-						errCh <- fmt.Errorf("failed to write data to buffer: %w", err)
-						return
-					}
-
-					err = writer.WriteByte('\n')
-					if err != nil {
-						log.Debug().Err(err).Msg("write byte err")
-						errCh <- fmt.Errorf("failed to write data to buffer: %w", err)
-						return
-					}
-
-					writer.Flush()
-				}
-				s.mu.Unlock()
+				writer.Flush()
+			}
+			s.mu.Unlock()
 		}
 	}
 }
@@ -158,6 +168,7 @@ func (s *memStorage) restore() (err error) {
 	return nil
 }
 
+// Ping заглушка для совместимости с интерфейсом repository.Repository
 func (s *memStorage) Ping(ctx context.Context) error {
 	return nil
 }

@@ -1,27 +1,31 @@
 package repository
 
-import(
+import (
 	"context"
-	"iter"
 	"errors"
-	pgx "github.com/jackc/pgx/v5"
-	pgconn "github.com/jackc/pgconn"
-	pgxpool "github.com/jackc/pgx/v5/pgxpool"
-	"time"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 	"fmt"
-	"github.com/rs/zerolog/log"
+	"iter"
 	"strconv"
+	"time"
+
+	pgconn "github.com/jackc/pgconn"
+	pgx "github.com/jackc/pgx/v5"
+	pgxpool "github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
+
+	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
 )
 
 type dbDecorator struct {
 	db *pgxpool.Pool
 }
 
+// NewDBDecorator конструктор для обертки над БД, возвращает обертку с интерфейсом repository.Repository
 func NewDBDecorator(db *pgxpool.Pool) *dbDecorator {
 	return &dbDecorator{db: db}
 }
 
+// Set запись метрики, вернёт ошибку, если что-то пошло не тaк
 func (dbd *dbDecorator) Set(ctx context.Context, obj models.Metrics) error {
 	_, err := retry(
 		func() (any, error) {
@@ -29,11 +33,11 @@ func (dbd *dbDecorator) Set(ctx context.Context, obj models.Metrics) error {
 				ctx,
 				"INSERT INTO metrics (id, mtype, value, delta, hash) VALUES (@id, @mtype, @value, @delta, @hash) ON CONFLICT ON CONSTRAINT metrics_pkey DO UPDATE SET value = EXCLUDED.value, delta = EXCLUDED.delta, hash = EXCLUDED.hash",
 				pgx.NamedArgs{
-					"id": obj.ID,
+					"id":    obj.ID,
 					"mtype": obj.MType,
 					"value": obj.Value,
 					"delta": obj.Delta,
-					"hash": obj.Hash,
+					"hash":  obj.Hash,
 				},
 			)
 
@@ -49,9 +53,11 @@ func (dbd *dbDecorator) Set(ctx context.Context, obj models.Metrics) error {
 	if err != nil {
 		return fmt.Errorf("failed to save object to repository: %w", err)
 	}
+
 	return nil
 }
 
+// BulkSet массовая запись метрик, вернёт ошибку, если что-то пойдёт не так
 func (dbd *dbDecorator) BulkSet(ctx context.Context, objs []models.Metrics) error {
 	_, err := retry(
 		func() (any, error) {
@@ -66,14 +72,16 @@ func (dbd *dbDecorator) BulkSet(ctx context.Context, objs []models.Metrics) erro
 					ctx,
 					"INSERT INTO metrics (id, mtype, value, delta, hash) VALUES (@id, @mtype, @value, @delta, @hash) ON CONFLICT ON CONSTRAINT metrics_pkey DO UPDATE SET value = EXCLUDED.value, delta = EXCLUDED.delta, hash = EXCLUDED.hash",
 					pgx.NamedArgs{
-						"id": obj.ID,
+						"id":    obj.ID,
 						"mtype": obj.MType,
 						"value": obj.Value,
 						"delta": obj.Delta,
-						"hash": obj.Hash,
+						"hash":  obj.Hash,
 					},
 				)
-				if err != nil { return nil, fmt.Errorf("failed to insert object to db: %w", err) }
+				if err != nil {
+					return nil, fmt.Errorf("failed to insert object to db: %w", err)
+				}
 			}
 			err = tx.Commit(ctx)
 			if err != nil && !errors.Is(err, pgx.ErrTxClosed) {
@@ -91,6 +99,7 @@ func (dbd *dbDecorator) BulkSet(ctx context.Context, objs []models.Metrics) erro
 	return nil
 }
 
+// Get получение метрики по ключу, вернёт объект models.Metrics и ошибку
 func (dbd *dbDecorator) Get(ctx context.Context, key string) (models.Metrics, error) {
 	rows, err := retry(
 		func() (any, error) {
@@ -118,6 +127,7 @@ func (dbd *dbDecorator) Get(ctx context.Context, key string) (models.Metrics, er
 	return obj, nil
 }
 
+// Remove удаление метрики по ключу
 func (dbd *dbDecorator) Remove(ctx context.Context, key string) error {
 	_, err := retry(
 		func() (any, error) {
@@ -137,6 +147,7 @@ func (dbd *dbDecorator) Remove(ctx context.Context, key string) error {
 	return nil
 }
 
+// All получение итератора по всем хранимым метрикам, вернёт ошибку, если что-то пойдёт не так
 func (dbd *dbDecorator) All(ctx context.Context) (iter.Seq[models.Metrics], error) {
 	rows, err := retry(
 		func() (any, error) {
@@ -155,10 +166,15 @@ func (dbd *dbDecorator) All(ctx context.Context) (iter.Seq[models.Metrics], erro
 	}
 
 	return func(yield func(models.Metrics) bool) {
-		for _, v := range objs { if !yield(v) { return } }
+		for _, v := range objs {
+			if !yield(v) {
+				return
+			}
+		}
 	}, nil
 }
 
+// Ping проверка доступности БД
 func (dbd *dbDecorator) Ping(ctx context.Context) error {
 	_, err := retry(
 		func() (any, error) { return nil, dbd.db.Ping(ctx) },
@@ -174,11 +190,13 @@ func retry(request func() (any, error), maxRetries int) (any, error) {
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		log.Debug().Str("db attempt", strconv.Itoa(attempt)).Msg("db retry")
 		res, err := request()
-		if err == nil { return res, nil }
+		if err == nil {
+			return res, nil
+		}
 
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code[:2] == "08" {
-			<-time.After(time.Duration(2 * (attempt + 1) - 1) * time.Second)
+			<-time.After(time.Duration(2*(attempt+1)-1) * time.Second)
 			continue
 		}
 

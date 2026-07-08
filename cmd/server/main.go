@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"os"
+	"bytes"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
@@ -17,7 +19,19 @@ import (
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 )
 
+var(
+	buildVersion string = "N/A"
+	buildDate string = "N/A"
+	buildCommit string = "N/A"
+)
+
 func main() {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "Build version: %s\n", buildVersion)
+	fmt.Fprintf(&buf, "Build date: %s\n", buildDate)
+	fmt.Fprintf(&buf, "Build commit: %s\n", buildCommit)
+	os.Stdout.Write(buf.Bytes())
+
 	cfg := &config{}
 	err := parseFlags(cfg)
 	if err != nil {

@@ -1,7 +1,8 @@
 package osexitcheckanalyzer
 
-import(
+import (
 	"testing"
+
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 

@@ -1,6 +1,6 @@
 package pkg1
 
-import(
+import (
 	"os"
 )
 

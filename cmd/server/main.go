@@ -1,15 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
-	"os"
-	"bytes"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
@@ -19,10 +19,10 @@ import (
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 )
 
-var(
+var (
 	buildVersion string = "N/A"
-	buildDate string = "N/A"
-	buildCommit string = "N/A"
+	buildDate    string = "N/A"
+	buildCommit  string = "N/A"
 )
 
 func main() {
@@ -60,8 +60,12 @@ func run(cfg *config) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to initialize repository: %w", err)
 	}
+	privateBytes, err := os.ReadFile(cfg.SecretPath)
+	if err != nil {
+		return fmt.Errorf("failed read private key")
+	}
 
-	c := handler.NewMetricsController(ctx, repo, cfg.Key)
+	c := handler.NewMetricsController(ctx, repo, cfg.Key, privateBytes)
 	var auditOpts []observers.AuditOptionFunc
 	if cfg.AuditFile != "" {
 		auditOpts = append(auditOpts, observers.WithFile(ctx, cfg.AuditFile))

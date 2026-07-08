@@ -1,18 +1,19 @@
 package main
 
-import(
-	"github.com/rs/zerolog/log"
-	"os"
-	"go/parser"
+import (
+	"bytes"
+	"fmt"
 	"go/ast"
-	"go/types"
-	"golang.org/x/tools/go/packages"
+	"go/format"
+	"go/parser"
 	"go/token"
+	"go/types"
+	"os"
 	"path/filepath"
 	"text/template"
-	"bytes"
-	"go/format"
-	"fmt"
+
+	"github.com/rs/zerolog/log"
+	"golang.org/x/tools/go/packages"
 )
 
 const templateStr = `
@@ -55,35 +56,35 @@ func (rs *{{.Name}}) Reset() {
 {{end}}
 `
 
-var primitiveDic = map[string]string {
-	"int": "0",
-	"int8": "0",
-	"int16": "0",
-	"int32": "0",
-	"int64": "0",
-	"uint": "0",
-	"uint8": "0",
-	"uint16": "0",
-	"uint32": "0",
-	"uint64": "0",
-	"uintptr": "0",
-	"float32": "0.0",
-	"float64": "0.0",
-	"string": "\"\"",
-	"complex64": "(0+0i)",
+var primitiveDic = map[string]string{
+	"int":        "0",
+	"int8":       "0",
+	"int16":      "0",
+	"int32":      "0",
+	"int64":      "0",
+	"uint":       "0",
+	"uint8":      "0",
+	"uint16":     "0",
+	"uint32":     "0",
+	"uint64":     "0",
+	"uintptr":    "0",
+	"float32":    "0.0",
+	"float64":    "0.0",
+	"string":     "\"\"",
+	"complex64":  "(0+0i)",
 	"complex128": "(0+0i)",
-	"bool": "false",
-	"rune": "0",
-	"byte": "0",
+	"bool":       "false",
+	"rune":       "0",
+	"byte":       "0",
 }
 
 type templatePackage struct {
-	Name string
+	Name    string
 	Structs []templateStruct
 }
 
 type templateStruct struct {
-	Name string
+	Name   string
 	Fields []templateField
 }
 
@@ -93,8 +94,8 @@ type templateField struct {
 }
 
 type templateFieldType struct {
-	Name string
-	IsPtr bool
+	Name        string
+	IsPtr       bool
 	IsResetable bool
 	IsInterface bool
 }
@@ -139,7 +140,7 @@ func main() {
 	dirPath := os.Args[1]
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedSyntax | packages.NeedImports,
-		Env: os.Environ(),
+		Env:  os.Environ(),
 	}
 
 	pkgs, err := packages.Load(cfg, "all")
@@ -177,42 +178,42 @@ func main() {
 												typeField.Name = ident.Name
 											}
 											switch t := field.Type.(type) {
+											case *ast.Ident:
+												typeField.Type = templateFieldType{Name: t.Name}
+												if t.Name == "any" {
+													typeField.Type.IsInterface = true
+												}
+												searchResetInPkg(pkgs, &typeField, "", t.Name)
+											case *ast.SelectorExpr:
+												ident, ok := t.X.(*ast.Ident)
+												if !ok {
+													continue
+												}
+												typeField.Type = templateFieldType{Name: ident.Name}
+												typeField.Type.Name += "." + t.Sel.Name
+												searchResetInPkg(pkgs, &typeField, ident.Name, t.Sel.Name)
+											case *ast.StarExpr:
+												switch tt := t.X.(type) {
 												case *ast.Ident:
-													typeField.Type = templateFieldType{Name: t.Name}
-													if t.Name == "any" {
-														typeField.Type.IsInterface = true
-													}
-													searchResetInPkg(pkgs, &typeField, "", t.Name)
+													typeField.Type = templateFieldType{Name: tt.Name, IsPtr: true}
+													searchResetInPkg(pkgs, &typeField, "", tt.Name)
 												case *ast.SelectorExpr:
-													ident, ok := t.X.(*ast.Ident)
+													ident, ok := tt.X.(*ast.Ident)
 													if !ok {
 														continue
 													}
-													typeField.Type = templateFieldType{Name: ident.Name }
-													typeField.Type.Name += "." + t.Sel.Name
-													searchResetInPkg(pkgs, &typeField, ident.Name, t.Sel.Name)
-												case *ast.StarExpr:
-													switch tt := t.X.(type) {
-														case *ast.Ident:
-															typeField.Type = templateFieldType{Name: tt.Name, IsPtr: true }
-															searchResetInPkg(pkgs, &typeField, "", tt.Name)
-														case *ast.SelectorExpr:
-															ident, ok := tt.X.(*ast.Ident)
-															if !ok {
-																continue
-															}
-															typeField.Type = templateFieldType{Name: ident.Name, IsPtr: true }
-															typeField.Type.Name += "." + tt.Sel.Name
-															searchResetInPkg(pkgs, &typeField, ident.Name, tt.Sel.Name)
-													}
+													typeField.Type = templateFieldType{Name: ident.Name, IsPtr: true}
+													typeField.Type.Name += "." + tt.Sel.Name
+													searchResetInPkg(pkgs, &typeField, ident.Name, tt.Sel.Name)
+												}
 
-												case *ast.MapType:
-													typeField.Type = templateFieldType{Name: "Map"}
+											case *ast.MapType:
+												typeField.Type = templateFieldType{Name: "Map"}
 
-												case *ast.ArrayType:
-													typeField.Type = templateFieldType{Name: "Array"}
-												case *ast.InterfaceType:
-													typeField.Type = templateFieldType{Name: "Interface", IsInterface: true }
+											case *ast.ArrayType:
+												typeField.Type = templateFieldType{Name: "Array"}
+											case *ast.InterfaceType:
+												typeField.Type = templateFieldType{Name: "Interface", IsInterface: true}
 											}
 											typeStruct.Fields = append(typeStruct.Fields, typeField)
 										}
@@ -226,7 +227,7 @@ func main() {
 						}
 					}
 				}
-				
+
 			}
 		}
 
@@ -245,7 +246,7 @@ func main() {
 			return fmt.Errorf("format buf err: %w", err)
 		}
 
-		err = os.WriteFile(filepath.Dir(fname) + "/" + "reset.gen.go", bufFmt, 0644)
+		err = os.WriteFile(filepath.Dir(fname)+"/"+"reset.gen.go", bufFmt, 0644)
 		if err != nil {
 			return fmt.Errorf("write to file err: %w", err)
 		}

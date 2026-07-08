@@ -1,8 +1,9 @@
 package resetable_pool
 
-import(
-	"testing"
+import (
 	"bytes"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 
 	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"

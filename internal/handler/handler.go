@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -28,15 +32,27 @@ import (
 )
 
 type metricsController struct {
-	storage   repository.Repository
-	observers []observers.Observer
-	key       string
+	storage    repository.Repository
+	observers  []observers.Observer
+	privateKey *rsa.PrivateKey
+	key        string
 }
 
 // NewMetricsController конструктор для metricsController, возвращает указатель на metricsController
-func NewMetricsController(ctx context.Context, storage repository.Repository, key string) *metricsController {
+func NewMetricsController(ctx context.Context, storage repository.Repository, key string, privateBytes []byte) *metricsController {
 	controller := &metricsController{storage: storage, key: key}
 	controller.observers = make([]observers.Observer, 0)
+
+	privatePemBlock, _ := pem.Decode(privateBytes)
+	if privatePemBlock == nil {
+		log.Error().Msg("private key not found")
+	}
+
+	privateKey, err := x509.ParsePKCS1PrivateKey(privatePemBlock.Bytes)
+	if err != nil {
+		log.Error().Err(err).Msg("failed parse private key")
+	}
+	controller.privateKey = privateKey
 	return controller
 }
 
@@ -115,7 +131,7 @@ const (
 
 // ApplyTo настройка маршрутизатора mux для работы с эндпоинтами metricsController
 func (c *metricsController) ApplyTo(mux chi.Router) {
-	mux.Use(recoveryPanic, c.checkHMAC, decodeRequest, c.logRequest)
+	mux.Use(recoveryPanic, c.checkHMAC, c.decryptRequest, decodeRequest, c.logRequest)
 	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)
 	mux.With(textPlainTypeSet).Get("/ping", c.ping)
 	mux.Route("/debug/", func(r chi.Router) {
@@ -212,6 +228,28 @@ func (c *metricsController) checkHMAC(next http.Handler) http.Handler {
 
 			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (c *metricsController) decryptRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Debug().Err(err).Msg("failed read body")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		r.Body.Close()
+		decryptedBody, err := rsa.DecryptPKCS1v15(rand.Reader, c.privateKey, bodyBytes)
+		if err != nil {
+			log.Debug().Err(err).Msg("failed decrypt body")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		r.Body = io.NopCloser(bytes.NewReader(decryptedBody))
 		next.ServeHTTP(w, r)
 	})
 }

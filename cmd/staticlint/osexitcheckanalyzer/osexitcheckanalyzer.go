@@ -1,15 +1,16 @@
 // Анализатор, который проверяет, есть ли в коде вызов os.Exit
 package osexitcheckanalyzer
 
-import(
-	"golang.org/x/tools/go/analysis"
+import (
 	"go/ast"
+
+	"golang.org/x/tools/go/analysis"
 )
 
 var Analyzer = &analysis.Analyzer{
 	Name: "osexitcheck",
-	Doc: "check for os.Exit",
-	Run: run,
+	Doc:  "check for os.Exit",
+	Run:  run,
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
@@ -38,11 +39,11 @@ func isOsExit(pass *analysis.Pass, call *ast.CallExpr) bool {
 		if ident, ok := sst.X.(*ast.Ident); ok {
 			if ident.Name == "os" {
 				if sst.Sel.Name == "Exit" {
-							return true
+					return true
 				}
 			}
 		}
 	}
-	
+
 	return false
 }

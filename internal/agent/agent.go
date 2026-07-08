@@ -15,6 +15,7 @@ import (
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
 )
 
+// generate:reset
 type agent struct {
 	stats       *stats.Stats
 	client      *client.Client

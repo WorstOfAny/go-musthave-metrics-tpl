@@ -13,6 +13,7 @@ type config struct {
 	PollInterval   int    `env:"POLL_INTERVAL"`
 	ReportInterval int    `env:"REPORT_INTERVAL"`
 	RateLimit      int    `env:"RATE_LIMIT"`
+	SecretPath     string `env:"SECRET_PATH"`
 }
 
 func parseFlags(cfg *config) (err error) {
@@ -21,6 +22,7 @@ func parseFlags(cfg *config) (err error) {
 	flag.IntVar(&cfg.PollInterval, "p", 2, "poll interval")
 	flag.IntVar(&cfg.ReportInterval, "r", 10, "report interval")
 	flag.IntVar(&cfg.RateLimit, "l", 10, "requests rate limit")
+	flag.StringVar(&cfg.SecretPath, "crypto-key", "", "server public key path")
 	flag.Parse()
 
 	err = env.Parse(cfg)

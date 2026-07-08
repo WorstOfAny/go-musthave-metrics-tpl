@@ -1,6 +1,6 @@
 package resetable_pool
 
-import(
+import (
 	"sync"
 )
 
@@ -10,15 +10,14 @@ type Resetable interface {
 
 type Pool[T Resetable] struct {
 	current *PoolItem[T]
-	mu sync.Mutex
-	newObj func() T
+	mu      sync.Mutex
+	newObj  func() T
 }
 
 type PoolItem[T Resetable] struct {
-	next *PoolItem[T]
+	next  *PoolItem[T]
 	value T
 }
-
 
 func New[T Resetable](objInitF func() T) *Pool[T] {
 	p := &Pool[T]{newObj: objInitF}
@@ -47,10 +46,10 @@ func (p *Pool[T]) Put(item T) {
 				i = i.next
 				continue
 			}
-			i.next = &PoolItem[T]{ value: item }
+			i.next = &PoolItem[T]{value: item}
 			break
 		}
 	}
 
-	p.current = &PoolItem[T]{ value: item }
+	p.current = &PoolItem[T]{value: item}
 }

@@ -3,6 +3,10 @@ package client
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -20,15 +24,17 @@ import (
 )
 
 // Client обёртка для resty.Client
+// generate:reset
 type Client struct {
 	client     *resty.Client
 	bufferPool *sync.Pool
+	publicKey  *rsa.PublicKey
 }
 
 // NewClient конструктор для Client, возвращает указатель на объект типа Client
 // baseURL - адрес сервера, куда будут отправляться запросы
 // key - secret key, которым будет осуществляться подпись данных
-func NewClient(baseURL string, key string) *Client {
+func NewClient(baseURL string, key string, cert []byte) *Client {
 	restyC := resty.New()
 	restyC.
 		SetBaseURL(baseURL).
@@ -75,6 +81,18 @@ func NewClient(baseURL string, key string) *Client {
 		},
 	}
 
+	certPemBlock, _ := pem.Decode(cert)
+	if certPemBlock == nil {
+		log.Error().Msg("certificate not found")
+	}
+
+	certificate, err := x509.ParseCertificate(certPemBlock.Bytes)
+	if err != nil {
+		log.Error().Err(err).Msg("failed parse certificate")
+	}
+
+	cl.publicKey = certificate.PublicKey.(*rsa.PublicKey)
+
 	return cl
 }
 
@@ -83,19 +101,23 @@ func (c *Client) Post(action string, body []byte) error {
 	cbody := c.bufferPool.Get().(*bytes.Buffer)
 	gw, err := gzip.NewWriterLevel(cbody, gzip.BestCompression)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init gzip writer: %w", err)
 	}
 
 	gw.Write(body)
 	gw.Close()
-	log.Info().Str("body", string(body)).Int("len", len(body)).Str("compressed_body", cbody.String()).Int("comprassed_len", len(cbody.Bytes())).Msg("")
+
+	body, err = rsa.EncryptPKCS1v15(rand.Reader, c.publicKey, cbody.Bytes())
+	if err != nil {
+		return fmt.Errorf("failed to encrypt body: %w", err)
+	}
 
 	resp, err := c.client.R().
 		SetDoNotParseResponse(true).
 		SetHeader("Content-Type", "application/json").
 		SetHeader("Content-Encoding", "gzip").
 		SetHeader("Accept-Encoding", "gzip").
-		SetBody(cbody.Bytes()).
+		SetBody(body).
 		Post(action)
 
 	cbody.Reset()

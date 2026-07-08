@@ -17,6 +17,8 @@ type Observer interface {
 	Update([]byte)
 }
 
+// generate:reset
+
 type audit struct {
 	client *client.Client
 	file   *os.File
@@ -43,7 +45,7 @@ type AuditOptionFunc func(*audit) error
 // WithURL функциональная опция для установки URL, куда будут посылаться события
 func WithURL(url string) AuditOptionFunc {
 	return func(a *audit) error {
-		client := client.NewClient(url, "")
+		client := client.NewClient(url, "", []byte{})
 		a.client = client
 		return nil
 	}

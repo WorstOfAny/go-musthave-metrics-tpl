@@ -1,13 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"os/signal"
 	"syscall"
-	"os"
-	"bytes"
 
 	"github.com/rs/zerolog/log"
 
@@ -16,10 +16,10 @@ import (
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
 )
 
-var(
+var (
 	buildVersion string = "N/A"
-	buildDate string = "N/A"
-	buildCommit string = "N/A"
+	buildDate    string = "N/A"
+	buildCommit  string = "N/A"
 )
 
 func main() {
@@ -45,7 +45,11 @@ func run(cfg *config) (err error) {
 	defer cancelFunc()
 
 	s := stats.NewStats()
-	c := client.NewClient((&url.URL{Scheme: "http", Host: cfg.ReportAddr}).String(), cfg.Key)
+	certBytes, err := os.ReadFile(cfg.SecretPath)
+	if err != nil {
+		return fmt.Errorf("failed read server public key")
+	}
+	c := client.NewClient((&url.URL{Scheme: "http", Host: cfg.ReportAddr}).String(), cfg.Key, certBytes)
 
 	a := agent.NewAgent(c, s, cfg.RateLimit, cfg.ReportInterval, cfg.PollInterval)
 	err = a.Start(ctx)

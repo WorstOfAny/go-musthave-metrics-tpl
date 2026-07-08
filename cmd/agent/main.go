@@ -1,21 +1,25 @@
 package main
 
-import(
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/agent"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
+import (
+	"context"
 	"fmt"
+	"net/url"
 	"os/signal"
 	"syscall"
-	"context"
+
 	"github.com/rs/zerolog/log"
-	"net/url"
+
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/agent"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
 )
 
 func main() {
 	cfg := &config{}
 	err := parseFlags(cfg)
-	if err != nil { panic(fmt.Errorf("failed to parse flags: %w", err)) }
+	if err != nil {
+		panic(fmt.Errorf("failed to parse flags: %w", err))
+	}
 	if err := run(cfg); err != nil {
 		log.Debug().Err(err).Msg("server error")
 		panic(err)
@@ -27,7 +31,7 @@ func run(cfg *config) (err error) {
 	defer cancelFunc()
 
 	s := stats.NewStats()
-	c := client.NewClient((&url.URL{ Scheme: "http", Host: cfg.ReportAddr }).String(), cfg.Key)
+	c := client.NewClient((&url.URL{Scheme: "http", Host: cfg.ReportAddr}).String(), cfg.Key)
 
 	a := agent.NewAgent(c, s, cfg.RateLimit, cfg.ReportInterval, cfg.PollInterval)
 	err = a.Start(ctx)

@@ -1,12 +1,14 @@
 package agent
 
-import(
+import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
 	"github.com/stretchr/testify/assert"
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
+
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/client"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/stats"
 )
 
 func TestReportMetrics(t *testing.T) {

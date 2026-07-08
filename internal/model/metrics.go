@@ -1,33 +1,36 @@
 package models
 
-import(
-	"strconv"
-	"fmt"
+import (
 	"encoding/json"
+	"fmt"
+	"strconv"
 )
 
+// FailReason тип для причины ошибки MetricError, возвращаемая при невозможности создать или обновить объект
 type FailReason string
 
 const (
-	Counter = "counter"
-	Gauge   = "gauge"
-	EmptyID FailReason = "Empty ID"
-	EmptyValue FailReason = "Empty value"
-	WrongType FailReason = "Wrong metric type"
+	Counter                 = "counter"
+	Gauge                   = "gauge"
+	EmptyID      FailReason = "Empty ID"
+	EmptyValue   FailReason = "Empty value"
+	WrongType    FailReason = "Wrong metric type"
 	InvalidFloat FailReason = "Invalid float"
-	InvalidInt FailReason = "Invalid int"
+	InvalidInt   FailReason = "Invalid int"
 )
 
+// MetricError тип ошибки, возвращаемый при неудачных операциях с метриками
 type MetricError struct {
-	Reason FailReason
+	Reason  FailReason
 	Message string
-	Err error
+	Err     error
 }
 
 func (e *MetricError) Error() string {
 	return e.Message
 }
 
+// Cause причина ошибки
 func (e *MetricError) Cause() FailReason {
 	return e.Reason
 }
@@ -36,12 +39,8 @@ func (e *MetricError) Unwrap() error {
 	return e.Err
 }
 
-// NOTE: Не усложняем пример, вводя иерархическую вложенность структур.
-// Органичиваясь плоской моделью.
-// Delta и Value объявлены через указатели,
-// что бы отличать значение "0", от не заданного значения
-// и соответственно не кодировать в структуру.
-
+// Metrics тип для представления собираемых метрик
+// generate:reset
 type Metrics struct {
 	ID    string   `json:"id" db:"id"`
 	MType string   `json:"type" db:"mtype"`
@@ -50,18 +49,23 @@ type Metrics struct {
 	Hash  string   `json:"hash,omitempty" db:"hash"`
 }
 
+// NewMetric конструктор для метрики, возвращает указатель на Metrics и ошибку создания
 func NewMetric(mtype string, id string, value string) (*Metrics, error) {
-	m := &Metrics{ID: id, MType: mtype }
+	m := &Metrics{ID: id, MType: mtype}
 	updErr := m.Update(value)
 
 	_, validErr := m.Valid()
-	if validErr != nil { return nil, validErr }
-	if updErr != nil { return nil, updErr }
-
+	if validErr != nil {
+		return nil, validErr
+	}
+	if updErr != nil {
+		return nil, updErr
+	}
 
 	return m, nil
 }
 
+// Valid проверка, что метрика правильная
 func (m *Metrics) Valid() (bool, error) {
 	err := &MetricError{}
 	var ok bool
@@ -71,78 +75,88 @@ func (m *Metrics) Valid() (bool, error) {
 		return ok, err
 	}
 	switch m.MType {
-		case Gauge:
-			if m.Value == nil {
-				err.Reason = EmptyValue
-				err.Message = "Empty value forbidden"
-				return ok, err
-			}
-			ok = true
-		case Counter: 
-			if m.Delta == nil {
-				err.Reason = EmptyValue
-				err.Message = "Empty value forbidden"
-				return ok, err
-			}
-			ok = true
-		default:
-			err.Reason = WrongType
-			err.Message = "Unsupported metric type"
+	case Gauge:
+		if m.Value == nil {
+			err.Reason = EmptyValue
+			err.Message = "Empty value forbidden"
 			return ok, err
+		}
+		ok = true
+	case Counter:
+		if m.Delta == nil {
+			err.Reason = EmptyValue
+			err.Message = "Empty value forbidden"
+			return ok, err
+		}
+		ok = true
+	default:
+		err.Reason = WrongType
+		err.Message = "Unsupported metric type"
+		return ok, err
 	}
 
 	return ok, nil
 }
 
+// Update обновление метрики согласно её типу
 func (m *Metrics) Update(value string) error {
 	err := &MetricError{}
 	switch m.MType {
-		case Gauge:
-			if newValue, parseErr := strconv.ParseFloat(value, 64); parseErr == nil {
-				if m.Value == nil {
-					m.Value = &newValue
-				} else {
-					*m.Value = newValue
-				}
+	case Gauge:
+		if newValue, parseErr := strconv.ParseFloat(value, 64); parseErr == nil {
+			if m.Value == nil {
+				m.Value = &newValue
 			} else {
-				err.Reason = InvalidFloat
-				err.Message = "Failed parse float from value"
-				return err
+				*m.Value = newValue
 			}
-		case Counter:
-			if newValue, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil {
-				if m.Delta == nil {
-					m.Delta = &newValue
-				} else {
-					*m.Delta += newValue
-				}
-			} else {
-				err.Reason = InvalidInt
-				err.Message = "Failed parse int from value"
-				return err
-			}
-		default:
-			err.Reason = WrongType
-			err.Message = "Unsupported type"
+		} else {
+			err.Reason = InvalidFloat
+			err.Message = "Failed parse float from value"
 			return err
+		}
+	case Counter:
+		if newValue, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil {
+			if m.Delta == nil {
+				m.Delta = &newValue
+			} else {
+				*m.Delta += newValue
+			}
+		} else {
+			err.Reason = InvalidInt
+			err.Message = "Failed parse int from value"
+			return err
+		}
+	default:
+		err.Reason = WrongType
+		err.Message = "Unsupported type"
+		return err
 	}
 
 	return nil
 }
 
+// StringValue текстовое отображение значения метрики
 func (m Metrics) StringValue() (result string) {
 	switch m.MType {
-		case Gauge: if m.Value != nil { result = strconv.FormatFloat(*m.Value, 'g', -1, 64) }
-		case Counter: if m.Delta != nil { result = strconv.FormatInt(*m.Delta, 10) }
+	case Gauge:
+		if m.Value != nil {
+			result = strconv.FormatFloat(*m.Value, 'g', -1, 64)
+		}
+	case Counter:
+		if m.Delta != nil {
+			result = strconv.FormatInt(*m.Delta, 10)
+		}
 	}
 
 	return result
 }
 
+// String текстовое отображение метрики
 func (m Metrics) String() string {
 	return fmt.Sprintf("%s %s: %s", m.MType, m.ID, m.StringValue())
 }
 
+// Key уникальный идентификатор метрики
 func (m Metrics) Key() string {
 	return m.MType + m.ID
 }
@@ -150,15 +164,19 @@ func (m Metrics) Key() string {
 func (m *Metrics) UnmarshalJSON(data []byte) error {
 	type Alias Metrics
 
-	al := struct { *Alias }{
+	al := struct{ *Alias }{
 		Alias: (*Alias)(m),
 	}
 
-	if err := json.Unmarshal(data, &al); err != nil { return err }
+	if err := json.Unmarshal(data, &al); err != nil {
+		return err
+	}
 
 	ok, cause := m.Valid()
 
-	if !ok { return cause }
+	if !ok {
+		return cause
+	}
 
 	return nil
 }

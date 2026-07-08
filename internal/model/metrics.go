@@ -40,6 +40,7 @@ func (e *MetricError) Unwrap() error {
 }
 
 // Metrics тип для представления собираемых метрик
+// generate:reset
 type Metrics struct {
 	ID    string   `json:"id" db:"id"`
 	MType string   `json:"type" db:"mtype"`

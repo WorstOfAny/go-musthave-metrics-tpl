@@ -384,7 +384,7 @@ func runCases(t *testing.T, cases []requestCase, metrics []models.Metrics) {
 			t.Fatal(err)
 		}
 
-		c := NewMetricsController(ctx, repo, "")
+		c := NewMetricsController(ctx, repo, "", []byte{})
 		for _, v := range metrics {
 			c.storage.Set(ctx, v)
 		}
@@ -431,7 +431,7 @@ func Example() {
 	defer cancelFunc()
 	repoMock := initMockRepoForExample()
 
-	c := NewMetricsController(ctx, repoMock, "")
+	c := NewMetricsController(ctx, repoMock, "", []byte{})
 	r := chi.NewRouter()
 	c.ApplyTo(r)
 

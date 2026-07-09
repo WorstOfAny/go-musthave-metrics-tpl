@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -19,10 +20,32 @@ import (
 
 // Config настройки для репозитория
 type Config struct {
-	StoreInterval   int    `env:"STORE_INTERVAL"`    // время обновления файлового хранилища
-	FileStoragePath string `env:"FILE_STORAGE_PATH"` // путь к файловому хранилищу
-	RestoreStorage  bool   `env:"RESTORE"`           // нужно ли восстанавливать хранилище из файла при запуске приложения
-	DatabaseDSN     string `env:"DATABASE_DSN"`      // адрес БД
+	StoreInterval   time.Duration `env:"STORE_INTERVAL" json:"store_interval"` // время обновления файлового хранилища
+	FileStoragePath string        `env:"FILE_STORAGE_PATH" json:"store_file"`  // путь к файловому хранилищу
+	RestoreStorage  bool          `env:"RESTORE" json:"restore"`               // нужно ли восстанавливать хранилище из файла при запуске приложения
+	DatabaseDSN     string        `env:"DATABASE_DSN" json:"database_dsn"`     // адрес БД
+}
+
+func (c *Config) UnmarshalJSON(data []byte) error {
+	type Alias Config
+	al := &struct {
+		StoreInterval string `json:"store_interval"`
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+
+	if err := json.Unmarshal(data, al); err != nil {
+		return err
+	}
+
+	duration, err := time.ParseDuration(al.StoreInterval)
+	if err != nil {
+		return fmt.Errorf("failed parse duration: %w", err)
+	}
+
+	c.StoreInterval = duration
+	return nil
 }
 
 // Repository интерфейс для файлового хранилища и обертки БД

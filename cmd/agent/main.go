@@ -29,7 +29,7 @@ func main() {
 	fmt.Fprintf(&buf, "Build commit: %s\n", buildCommit)
 	os.Stdout.Write(buf.Bytes())
 
-	cfg := &config{}
+	cfg := newConfig()
 	err := parseFlags(cfg)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse flags: %w", err))

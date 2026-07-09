@@ -26,13 +26,13 @@ type agent struct {
 }
 
 // NewAgent конструктор для агента, возвращает указатель на объект типа agent
-func NewAgent(client *client.Client, stats *stats.Stats, ratelimit int, reportInterval int, pollInterval int) *agent {
+func NewAgent(client *client.Client, stats *stats.Stats, ratelimit int, reportInterval time.Duration, pollInterval time.Duration) *agent {
 	return &agent{
 		stats:       stats,
 		client:      client,
 		rateLimit:   ratelimit,
-		reportDelay: time.Duration(reportInterval) * time.Second,
-		pollDelay:   time.Duration(pollInterval) * time.Second,
+		reportDelay: reportInterval,
+		pollDelay:   pollInterval,
 	}
 }
 

@@ -19,7 +19,7 @@ func TestReportMetrics(t *testing.T) {
 		w.Write([]byte(""))
 	}))
 	defer ts.Close()
-	c := client.NewClient(ts.URL, "")
+	c := client.NewClient(ts.URL, "", []byte{})
 	s := stats.NewStats()
 	a := NewAgent(c, s, 1, 2, 1)
 	a.reportMetrics()

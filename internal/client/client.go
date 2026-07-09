@@ -84,11 +84,13 @@ func NewClient(baseURL string, key string, cert []byte) *Client {
 	certPemBlock, _ := pem.Decode(cert)
 	if certPemBlock == nil {
 		log.Error().Msg("certificate not found")
+		return cl
 	}
 
 	certificate, err := x509.ParseCertificate(certPemBlock.Bytes)
 	if err != nil {
 		log.Error().Err(err).Msg("failed parse certificate")
+		return cl
 	}
 
 	cl.publicKey = certificate.PublicKey.(*rsa.PublicKey)
@@ -107,9 +109,13 @@ func (c *Client) Post(action string, body []byte) error {
 	gw.Write(body)
 	gw.Close()
 
-	body, err = rsa.EncryptPKCS1v15(rand.Reader, c.publicKey, cbody.Bytes())
-	if err != nil {
-		return fmt.Errorf("failed to encrypt body: %w", err)
+	if c.publicKey != nil {
+		body, err = rsa.EncryptPKCS1v15(rand.Reader, c.publicKey, cbody.Bytes())
+		if err != nil {
+			return fmt.Errorf("failed to encrypt body: %w", err)
+		}
+	} else {
+		body = cbody.Bytes()
 	}
 
 	resp, err := c.client.R().

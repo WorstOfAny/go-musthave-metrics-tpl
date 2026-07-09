@@ -46,11 +46,13 @@ func NewMetricsController(ctx context.Context, storage repository.Repository, ke
 	privatePemBlock, _ := pem.Decode(privateBytes)
 	if privatePemBlock == nil {
 		log.Error().Msg("private key not found")
+		return controller
 	}
 
 	privateKey, err := x509.ParsePKCS1PrivateKey(privatePemBlock.Bytes)
 	if err != nil {
 		log.Error().Err(err).Msg("failed parse private key")
+		return controller
 	}
 	controller.privateKey = privateKey
 	return controller
@@ -234,6 +236,10 @@ func (c *metricsController) checkHMAC(next http.Handler) http.Handler {
 
 func (c *metricsController) decryptRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c.privateKey == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
 			log.Debug().Err(err).Msg("failed read body")

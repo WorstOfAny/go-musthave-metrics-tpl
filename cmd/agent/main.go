@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"errors"
 
 	"github.com/rs/zerolog/log"
 
@@ -35,13 +36,17 @@ func main() {
 		panic(fmt.Errorf("failed to parse flags: %w", err))
 	}
 	if err := run(cfg); err != nil {
-		log.Debug().Err(err).Msg("server error")
+		if errors.Is(err, context.Canceled) {
+			log.Info().Msg("agent gracefully shutdown")
+			return
+		}
+		log.Error().Err(err).Msg("agent error")
 		panic(err)
 	}
 }
 
 func run(cfg *config) (err error) {
-	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancelFunc := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancelFunc()
 
 	s := stats.NewStats()
@@ -56,6 +61,12 @@ func run(cfg *config) (err error) {
 
 	if err != nil {
 		return fmt.Errorf("agent error: %w", err)
+	}
+
+	<-ctx.Done()
+
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	return nil

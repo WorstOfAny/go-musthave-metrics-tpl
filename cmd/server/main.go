@@ -100,5 +100,6 @@ func runServer(ctx context.Context, addr string, r *chi.Mux) error {
 			log.Info().Err(err).Msg("server forced to shutdown")
 		}
 	}()
+
 	return srv.ListenAndServe()
 }

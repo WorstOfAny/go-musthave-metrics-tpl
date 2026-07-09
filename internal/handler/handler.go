@@ -1,45 +1,103 @@
 package handler
 
-import(
-	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"net/http/httputil"
+	"net/http/pprof"
+	"runtime/debug"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	pgconn "github.com/jackc/pgconn"
+	"github.com/rs/zerolog/log"
+
+	models "github.com/WorstOfAny/go-musthave-metrics-tpl/internal/model"
+	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/observers"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/repository"
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
-	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog/log"
-	pgconn "github.com/jackc/pgconn"
-	"net/http"
-	"strings"
-	"context"
-	"fmt"
-	"time"
-	"encoding/json"
-	"net/http/httputil"
-	"compress/gzip"
-	"io"
-	"runtime/debug"
-	"errors"
-	"maps"
-	"slices"
-	"bytes"
 )
 
 type metricsController struct {
-	storage repository.Repository
-	key string
+	storage    repository.Repository
+	observers  []observers.Observer
+	privateKey *rsa.PrivateKey
+	key        string
 }
 
-func NewMetricsController(storage repository.Repository, key string) *metricsController {
-	return &metricsController{storage: storage, key: key}
+// NewMetricsController конструктор для metricsController, возвращает указатель на metricsController
+func NewMetricsController(ctx context.Context, storage repository.Repository, key string, privateBytes []byte) *metricsController {
+	controller := &metricsController{storage: storage, key: key}
+	controller.observers = make([]observers.Observer, 0)
+
+	privatePemBlock, _ := pem.Decode(privateBytes)
+	if privatePemBlock == nil {
+		log.Error().Msg("private key not found")
+		return controller
+	}
+
+	privateKey, err := x509.ParsePKCS1PrivateKey(privatePemBlock.Bytes)
+	if err != nil {
+		log.Error().Err(err).Msg("failed parse private key")
+		return controller
+	}
+	controller.privateKey = privateKey
+	return controller
+}
+
+// Event событие, которое наблюдатель отслеживает
+type Event struct {
+	Metrics []string
+	TS      time.Time
+	IPAddr  string
+}
+
+// Register добавление наблюдателей для отслеживания событий
+func (c *metricsController) Register(o observers.Observer) {
+	c.observers = append(c.observers, o)
+}
+
+func (c *metricsController) newEvent(metrics []models.Metrics, ip_addr string) {
+	metricIDs := make([]string, len(metrics))
+	for i, m := range metrics {
+		metricIDs[i] = m.ID
+	}
+
+	event := Event{Metrics: metricIDs, TS: time.Now(), IPAddr: ip_addr}
+	data, err := json.Marshal(event)
+
+	if err != nil {
+		log.Error().Err(err).Msg("marshal event error")
+		return
+	}
+
+	for _, obs := range c.observers {
+		obs.Update(data)
+	}
+
 }
 
 type responseData struct {
 	status int
-	size int
+	size   int
 }
 type responseWriter struct {
 	http.ResponseWriter
 	responseData *responseData
-	key string
+	key          string
 }
 
 func (wr *responseWriter) Write(b []byte) (int, error) {
@@ -66,22 +124,30 @@ func (w gzipWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
-
 type ctxKey string
 
-const(
-	metricKey ctxKey = "metric"
+const (
+	metricKey  ctxKey = "metric"
 	metricsKey ctxKey = "metrics"
 )
 
+// ApplyTo настройка маршрутизатора mux для работы с эндпоинтами metricsController
 func (c *metricsController) ApplyTo(mux chi.Router) {
-	mux.Use(recoveryPanic, c.checkHMAC, decodeRequest, c.logRequest)
+	mux.Use(recoveryPanic, c.checkHMAC, c.decryptRequest, decodeRequest, c.logRequest)
 	mux.With(textPlainTypeCheck, encodeResponse).Get("/", c.listAll)
 	mux.With(textPlainTypeSet).Get("/ping", c.ping)
+	mux.Route("/debug/", func(r chi.Router) {
+		r.HandleFunc("/pprof", pprof.Index)
+		r.HandleFunc("/cmdline", pprof.Cmdline)
+		r.HandleFunc("/profile", pprof.Profile)
+		r.HandleFunc("/symbol", pprof.Symbol)
+		r.HandleFunc("/trace", pprof.Trace)
+		r.HandleFunc("/*", http.HandlerFunc(pprof.Index))
+	})
 
 	mux.Route("/value", func(r chi.Router) {
 		r.With(jsonTypeSet, jsonTypeCheck, c.jsonCtx, encodeResponse).Post("/", c.showJSON)
-		r.Route("/{metricType}/{metricName}", func(r chi.Router){
+		r.Route("/{metricType}/{metricName}", func(r chi.Router) {
 			r.With(textPlainTypeSet, textPlainTypeCheck, c.plainGetCtx).Get("/", c.showTextPlain)
 		})
 	})
@@ -168,6 +234,32 @@ func (c *metricsController) checkHMAC(next http.Handler) http.Handler {
 	})
 }
 
+func (c *metricsController) decryptRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c.privateKey == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Debug().Err(err).Msg("failed read body")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		r.Body.Close()
+		decryptedBody, err := rsa.DecryptPKCS1v15(rand.Reader, c.privateKey, bodyBytes)
+		if err != nil {
+			log.Debug().Err(err).Msg("failed decrypt body")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		r.Body = io.NopCloser(bytes.NewReader(decryptedBody))
+		next.ServeHTTP(w, r)
+	})
+}
+
 func decodeRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
@@ -216,7 +308,9 @@ func encodeResponse(next http.Handler) http.Handler {
 func (c *metricsController) jsonCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqMetric models.Metrics
-		if !decodeMetrics(w, r, &reqMetric) { return }
+		if !decodeMetrics(w, r, &reqMetric) {
+			return
+		}
 
 		ctx := context.WithValue(r.Context(), metricKey, reqMetric)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -226,7 +320,9 @@ func (c *metricsController) jsonCtx(next http.Handler) http.Handler {
 func (c *metricsController) bulkJSONCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqMetrics []models.Metrics
-		if !decodeMetrics(w, r, &reqMetrics) { return }
+		if !decodeMetrics(w, r, &reqMetrics) {
+			return
+		}
 
 		ctx := context.WithValue(r.Context(), metricsKey, reqMetrics)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -280,7 +376,7 @@ func (c *metricsController) plainGetCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metricType := chi.URLParam(r, "metricType")
 		metricName := chi.URLParam(r, "metricName")
-		metric, err := c.storage.Get(r.Context(), metricType + metricName)
+		metric, err := c.storage.Get(r.Context(), metricType+metricName)
 
 		if err != nil {
 			metricErrorHandler(w, r, err, "error while fetching metric")
@@ -303,8 +399,10 @@ func metricErrorHandler(w http.ResponseWriter, r *http.Request, err error, logMs
 	var metrErr *models.MetricError
 	if errors.As(err, &metrErr) {
 		switch metrErr.Cause() {
-			case models.EmptyID: w.WriteHeader(http.StatusNotFound)
-			case models.EmptyValue, models.WrongType, models.InvalidFloat, models.InvalidInt: w.WriteHeader(http.StatusBadRequest)
+		case models.EmptyID:
+			w.WriteHeader(http.StatusNotFound)
+		case models.EmptyValue, models.WrongType, models.InvalidFloat, models.InvalidInt:
+			w.WriteHeader(http.StatusBadRequest)
 		}
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -348,8 +446,8 @@ func jsonTypeCheck(next http.Handler) http.Handler {
 
 func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	var body string
-	body += "<html><body>"
+	var body bytes.Buffer
+	body.WriteString("<html><body>")
 	objs, err := c.storage.All(r.Context())
 	if err != nil {
 		log.Debug().Err(err).Msg("failed to fetch metrics from db")
@@ -357,10 +455,10 @@ func (c *metricsController) listAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for v := range objs {
-		body += fmt.Sprintf("<p>%s</p>", v.String())
+		fmt.Fprintf(&body, "<p>%s</p>", v.String())
 	}
-	body += "</body></html>"
-	w.Write([]byte(body))
+	body.WriteString("</body></html>")
+	w.Write(body.Bytes())
 }
 
 func (c *metricsController) showJSON(w http.ResponseWriter, r *http.Request) {
@@ -444,6 +542,7 @@ func (c *metricsController) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write(response)
+	go c.newEvent([]models.Metrics{metric}, r.RemoteAddr)
 }
 
 func (c *metricsController) updates(w http.ResponseWriter, r *http.Request) {
@@ -504,6 +603,7 @@ func (c *metricsController) updates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write(response)
+	go c.newEvent(metrics, r.RemoteAddr)
 }
 
 func (c *metricsController) ping(w http.ResponseWriter, r *http.Request) {
@@ -519,9 +619,9 @@ func (c *metricsController) ping(w http.ResponseWriter, r *http.Request) {
 			log.Debug().
 				Err(err).
 				Msg("failed to ping database")
-				w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 		}
-			return
+		return
 	}
 
 	w.Write([]byte("Success"))

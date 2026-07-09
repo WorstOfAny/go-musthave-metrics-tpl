@@ -1,15 +1,16 @@
 package client
 
-import(
-	"net/http/httptest"
-	"net/http"
-	"testing"
+import (
 	"compress/gzip"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewClient(t *testing.T) {
-	NewClient("", "")
+	NewClient("", "", []byte{})
 }
 
 func TestPost(t *testing.T) {
@@ -21,7 +22,7 @@ func TestPost(t *testing.T) {
 		defer gz.Close()
 		gz.Write([]byte("{\"a\": 1}"))
 	}))
-	c := NewClient(ts.URL, "")
+	c := NewClient(ts.URL, "", []byte{})
 
 	err := c.Post("", []byte("{}"))
 	assert.NoError(t, err)

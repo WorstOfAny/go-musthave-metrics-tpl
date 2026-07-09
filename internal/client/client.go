@@ -1,26 +1,40 @@
 package client
 
-import(
-	"errors"
-	"strconv"
-	"time"
-	"io"
-	"github.com/go-resty/resty/v2"
-	"compress/gzip"
+import (
 	"bytes"
-	"github.com/rs/zerolog/log"
-	"syscall"
+	"compress/gzip"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/go-resty/resty/v2"
+	"github.com/rs/zerolog/log"
+
 	"github.com/WorstOfAny/go-musthave-metrics-tpl/internal/service"
-	"fmt"
 )
 
+// Client обёртка для resty.Client
+// generate:reset
 type Client struct {
-	client *resty.Client
+	client     *resty.Client
+	bufferPool *sync.Pool
+	publicKey  *rsa.PublicKey
 }
 
-func NewClient(baseURL string, key string) *Client {
+// NewClient конструктор для Client, возвращает указатель на объект типа Client
+// baseURL - адрес сервера, куда будут отправляться запросы
+// key - secret key, которым будет осуществляться подпись данных
+func NewClient(baseURL string, key string, cert []byte) *Client {
 	restyC := resty.New()
 	restyC.
 		SetBaseURL(baseURL).
@@ -39,47 +53,88 @@ func NewClient(baseURL string, key string) *Client {
 		SetRetryCount(3).
 		SetRetryMaxWaitTime(15 * time.Second).
 		SetRetryAfter(func(c *resty.Client, r *resty.Response) (time.Duration, error) {
-			delay := time.Duration(2 * (r.Request.Attempt) - 1) * time.Second
+			delay := time.Duration(2*(r.Request.Attempt)-1) * time.Second
 			return delay, nil
 		}).
 		AddRetryCondition(func(r *resty.Response, err error) bool {
 			if err != nil {
 				var netErr net.Error
 				log.Debug().Err(err).Msg("request err")
-				if errors.As(err, &netErr) && netErr.Timeout() { return true }
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					return true
+				}
 				return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.EOF)
 			}
 			return r.StatusCode() == http.StatusTooManyRequests || r.StatusCode() > 499
 		}).
 		AddRetryHook(func(r *resty.Response, err error) {
-			if err != nil { log.Debug().Str("attempt", strconv.Itoa(r.Request.Attempt)).Err(err).Msg("Request attempt") }
+			if err != nil {
+				log.Debug().Str("attempt", strconv.Itoa(r.Request.Attempt)).Err(err).Msg("Request attempt")
+			}
 		})
-	return &Client{ client: restyC }
+
+	cl := &Client{client: restyC}
+
+	cl.bufferPool = &sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
+
+	certPemBlock, _ := pem.Decode(cert)
+	if certPemBlock == nil {
+		log.Error().Msg("certificate not found")
+		return cl
+	}
+
+	certificate, err := x509.ParseCertificate(certPemBlock.Bytes)
+	if err != nil {
+		log.Error().Err(err).Msg("failed parse certificate")
+		return cl
+	}
+
+	cl.publicKey = certificate.PublicKey.(*rsa.PublicKey)
+
+	return cl
 }
 
+// Post отправка запроса на эндпоинт action с телом body
 func (c *Client) Post(action string, body []byte) error {
-	var cbody bytes.Buffer
-	gw, err := gzip.NewWriterLevel(&cbody, gzip.BestCompression)
-	if err != nil { return err }
+	cbody := c.bufferPool.Get().(*bytes.Buffer)
+	gw, err := gzip.NewWriterLevel(cbody, gzip.BestCompression)
+	if err != nil {
+		return fmt.Errorf("failed to init gzip writer: %w", err)
+	}
 
 	gw.Write(body)
 	gw.Close()
-	log.Info().Str("body", string(body)).Int("len", len(body)).Str("compressed_body", cbody.String()).Int("comprassed_len", len(cbody.Bytes())).Msg("")
+
+	if c.publicKey != nil {
+		body, err = rsa.EncryptPKCS1v15(rand.Reader, c.publicKey, cbody.Bytes())
+		if err != nil {
+			return fmt.Errorf("failed to encrypt body: %w", err)
+		}
+	} else {
+		body = cbody.Bytes()
+	}
 
 	resp, err := c.client.R().
 		SetDoNotParseResponse(true).
 		SetHeader("Content-Type", "application/json").
 		SetHeader("Content-Encoding", "gzip").
 		SetHeader("Accept-Encoding", "gzip").
-		SetBody(cbody.Bytes()).
+		SetBody(body).
 		Post(action)
+
+	cbody.Reset()
+	c.bufferPool.Put(cbody)
 
 	if err != nil {
 		log.Debug().Err(err).Msg("request err")
 		return err
 	}
 	defer resp.RawResponse.Body.Close()
-	
+
 	gr, err := gzip.NewReader(resp.RawResponse.Body)
 	if err != nil {
 		log.Debug().Err(err).Msg("gzip reader error")
